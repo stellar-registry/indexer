@@ -1,14 +1,8 @@
-# Welcome to your CDK TypeScript project
-
-This is a blank project for CDK development with TypeScript.
-
-The `cdk.json` file tells the CDK Toolkit how to execute your app.
-
-## Useful commands
-
-* `npm run build`   compile typescript to js
-* `npm run watch`   watch for changes and compile
-* `npm run test`    perform the jest unit tests
-* `npx cdk deploy`  deploy this stack to your default AWS account/region
-* `npx cdk diff`    compare deployed stack with current state
-* `npx cdk synth`   emits the synthesized CloudFormation template
+## AWS Lambda initial setup
+0. Make sure docker is installed and daemon is running
+1. Install [AWS CDK](https://docs.aws.amazon.com/cdk/v2/guide/getting-started.html) and [AWS cli](https://aws.amazon.com/cli/) (important: make sure AWS-cli is v2)
+2. Create AWS account (if not created yet)
+3. Select region. In this example we will be using `us-east-2`
+4. Run `aws configure`. To get the keys go to your AWS console -> click on the account (top right corner) -> Security credentials -> Access Keys -> create a key. Copy-paste key ID and secret in the terminal. Note: this will create root key that can access anything!
+5. Run `cdk bootstrap`. You can read more about CDK bootstrap [here](https://docs.aws.amazon.com/cdk/v2/guide/bootstrapping.html)
+6. 
