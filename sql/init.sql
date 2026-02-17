@@ -1,9 +1,9 @@
 -- <Current version - 2> is dropped
-DROP table IF EXISTS deploys_5;
-DROP TABLE IF EXISTS publishes_5;
+DROP table IF EXISTS deploys_3;
+DROP TABLE IF EXISTS publishes_3;
 
 -- <Current version - 1> is a backup
--- CREATE TABLE deploys_3(
+-- CREATE TABLE deploys_4(
 --   id TEXT not null PRIMARY KEY,
 --   transaction_hash TEXT not null,
 --   ledger_sequence bigint not null,

@@ -1,3 +1,35 @@
+# Registry indexer
+This project implements functionality to track activity in the registry contract.
+It explores 2 approaches: Goldsky filtering + AWS lambda fetching, and AWS lambda filtering + fetching.
+Both approaches use Goldsky to fetch initial data.
+Both approaches use AWS lambda to serve data to a client.
+
+## Golsky-first approach
+Goldsky-first approach uses `registrytest.yaml` configuration file as Goldsky pipeline configuration. 
+It first filters all events that belong to registry contract, then stores raw events (as a backup data).
+Finally, deploy/publish event JSONs are being parsed via SQL transformer and pushed into Postgres.
+Note: if there are any migration or changes in the events schema, events would need to be re-processed 
+from the first snapshot (tables need to be dropped for re-processing)
+Alternatively, tables could be manually migrated after a necessary pipeline change, 
+and data would need to be backfilled.
+
+## AWS lambda filtering
+Lambda filtering approach uses `registry-minimal.yaml` configuration as Goldsky pipeline configuration. 
+AWS stack is configured using CDK. It uses secretsmanager to store PG URL, and 
+and event scheduler to trigger periodic lambda execution.
+The lambda itself stores latest known ledger ID for event tables (in this case publish and deploy), 
+and check for new raw events that happened since the last known ID. 
+Once raw events are loaded, JSON records are parsed and stored in separate tables. 
+All table configurations are in `lib/db.types.ts`. 
+Note: if there are any migration or changes to the events, new table should be 
+created and logic updated accordingly. During period of "catch up" HTTP lambda 
+can still use old logic and old table to serve the clients stale data. 
+
+## AWS lambda fetching
+Finally, HTTP lambda serves client data from the deploys/publishes tables to the client. 
+Lambda doesn't do any data processing, so it's agnostic to filtering method 
+(it does assume that the schema of the tables created by different metohds for the same event is the same)
+
 ## AWS Lambda initial setup
 0. Make sure docker is installed and daemon is running
 1. Install [AWS CDK](https://docs.aws.amazon.com/cdk/v2/guide/getting-started.html) and [AWS cli](https://aws.amazon.com/cli/) (important: make sure AWS-cli is v2)

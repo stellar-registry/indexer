@@ -10,8 +10,8 @@ export class GoldskyStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    const handler = new lambda.NodejsFunction(this, 'goldsky', {
-      entry: 'lib/first-lambda.ts', // path to your code
+    const httpHandler = new lambda.NodejsFunction(this, 'goldsky', {
+      entry: 'lib/get-contracts.ts',
       handler: 'handler',
     });
 
@@ -19,12 +19,6 @@ export class GoldskyStack extends cdk.Stack {
       entry: 'lib/periodic-lambda.ts',
       handler: 'handler'
     })
-    //const url = handler.addFunctionUrl({
-    //  authType: FunctionUrlAuthType.NONE
-    // });
-    //new cdk.CfnOutput(this, 'url', {
-    //  value: url.url
-    //});
 
     const rule = new events.Rule(this, 'ScheduleRule', {
       schedule: events.Schedule.rate(cdk.Duration.minutes(1)),
@@ -36,27 +30,33 @@ export class GoldskyStack extends cdk.Stack {
 
     // Grant your Lambda access
     dbSecret.grantRead(periodicLambda);
+    dbSecret.grantRead(httpHandler);
 
     const goldsky_api = new apigateway.RestApi(this, 'api', {
       defaultCorsPreflightOptions: {
         allowOrigins: ['*'],
         allowMethods: ['ANY'],
+      },
+      deployOptions: {
+        throttlingBurstLimit: 1,
+        throttlingRateLimit: 1,
       }
     })
 
     new cdk.CfnOutput(this, 'apiUrl', { value: goldsky_api.url });
 
-    const trigger = goldsky_api.root.addResource('trigger')
+    const contracts = goldsky_api.root.addResource('registry').addResource('contracts')
 
-    trigger.addMethod(
-      'POST',
-      new apigateway.LambdaIntegration(handler, { proxy: true })
+    contracts.addMethod(
+      'GET',
+      new apigateway.LambdaIntegration(httpHandler, { proxy: true,  timeout: cdk.Duration.seconds(5) }),
+      {
+        requestParameters: {
+          // Optional http query parameters 
+          'method.request.querystring.limit': false,
+          'method.request.querystring.cursor': false,
+        },
+      }
     )
-    // The code that defines your stack goes here
-
-    // example resource
-    // const queue = new sqs.Queue(this, 'GoldskyQueue', {
-    //   visibilityTimeout: cdk.Duration.seconds(300)
-    // });
   }
 }

@@ -1,6 +1,6 @@
 resource_size: s
 sources:
-  source_1:
+  stellar_events:
     dataset_name: stellar_testnet.events
     version: 3.0.0
     type: dataset
@@ -10,7 +10,7 @@ transforms:
     type: sql
     primary_key: id
     sql: |-
-      SELECT * from source_1 
+      SELECT * from stellar_events 
         where contract_id = 'CBF5NGWSJARS6CKGEJ2WUR4RSSHQFKEXUS2V5FF6VJRBSLXZB2WMHXIV' 
         and in_successful_contract_call=true 
         and transaction_successful=true
@@ -165,13 +165,13 @@ transforms:
       from events_with_command_name
       where command = 'deploy'
 sinks:
-  sink_2:
+  raw_events:
     type: postgres
     table: events
     schema: public
     secret_name: HOSTED_POSTGRES_CMJD1KI8O0
     from: events
-  sink_3:
+  registry_deploys:
     type: postgres
     table: deploys
     schema: public

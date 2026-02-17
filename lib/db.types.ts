@@ -1,7 +1,9 @@
 export const TablesName = {
   // Managed by goldksky, do not drop!
   events: "public.events",
-  // Managed by lambda, safe to drop old versions
+  // Table used by http lambda to fetch data
+  get_publishes: "public.publishes_5",
+  // Managed by Periodic lambda, safe to drop old versions
   deploys: "public.deploys_5",
   publishes: "public.publishes_5"
 }

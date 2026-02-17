@@ -223,7 +223,7 @@ function parsePublish(event: DbEvent): PublishData {
         break
       }
       case "wasm_hash": {
-        publishData.wasm_hash = elem.val.string
+        publishData.wasm_hash = elem.val.bytes
         break
       }
       default: console.log("Unexpected symbol", elem.key.symbol)
