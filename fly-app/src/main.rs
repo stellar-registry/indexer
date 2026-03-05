@@ -9,7 +9,22 @@ struct QueryParams {
     cursor: Option<String>,
 }
 
-/// Table "publishes_5"
+/// Slim result for /wasms list endpoint
+#[derive(sqlx::FromRow, Serialize)]
+struct WasmResult {
+    #[serde(skip)]
+    id: String,
+    author: Option<String>,
+    version: Option<String>,
+    wasm_name: Option<String>,
+    wasm_hash: Option<String>,
+}
+
+/// Full detail for /wasms/{wasm_name} endpoint
+///
+/// From table "publishes_5":
+///
+/// ```
 ///       Column      |            Type             | Collation | Nullable | Default
 /// ------------------+-----------------------------+-----------+----------+---------
 ///  id               | text                        |           | not null |
@@ -20,9 +35,9 @@ struct QueryParams {
 ///  version          | text                        |           |          |
 ///  wasm_name        | text                        |           |          |
 ///  wasm_hash        | text                        |           |          |
-///
-#[derive(sqlx::FromRow)]
-struct WasmRow {
+/// ```
+#[derive(sqlx::FromRow, Serialize)]
+struct WasmDetail {
     id: String,
     transaction_hash: String,
     ledger_sequence: i64,
@@ -33,7 +48,23 @@ struct WasmRow {
     wasm_hash: Option<String>,
 }
 
-/// Table "deploys_5"
+/// Slim result for /contracts list endpoint
+#[derive(sqlx::FromRow, Serialize)]
+struct ContractResult {
+    #[serde(skip)]
+    id: String,
+    contract_id: Option<String>,
+    contract_name: Option<String>,
+    deployer: Option<String>,
+    version: Option<String>,
+    wasm_name: Option<String>,
+}
+
+/// Full detail for /contracts/{contract_name} endpoint
+///
+/// From table "deploys_5":
+///
+/// ```
 ///       Column      |            Type             | Collation | Nullable | Default
 /// ------------------+-----------------------------+-----------+----------+---------
 ///  id               | text                        |           | not null |
@@ -45,9 +76,9 @@ struct WasmRow {
 ///  deployer         | text                        |           |          |
 ///  version          | text                        |           |          |
 ///  wasm_name        | text                        |           |          |
-///
-#[derive(sqlx::FromRow)]
-struct ContractRow {
+/// ```
+#[derive(sqlx::FromRow, Serialize)]
+struct ContractDetail {
     id: String,
     transaction_hash: String,
     ledger_sequence: i64,
@@ -60,16 +91,8 @@ struct ContractRow {
 }
 
 #[derive(Serialize)]
-struct WasmResult {
-    author: Option<String>,
-    version: Option<String>,
-    wasm_name: Option<String>,
-    wasm_hash: Option<String>,
-}
-
-#[derive(Serialize)]
-struct Response {
-    result: Vec<WasmResult>,
+struct ListResponse<T: Serialize> {
+    result: Vec<T>,
     next: Option<String>,
 }
 
@@ -98,10 +121,10 @@ async fn get_wasms(pool: web::Data<PgPool>, query: web::Query<QueryParams>) -> H
     // and then by id (excluding passed id). Because IDs are strings, we transform passed id
     // With adding an extra 'z' symbol to ensure string is lexicographically greater
     // to go to the next transaction in the same ledger (if any)
-    let rows = sqlx::query_as::<_, WasmRow>(
+    let rows = sqlx::query_as::<_, WasmResult>(
         "SELECT id, author, version, wasm_name, wasm_hash FROM \
            (SELECT *, ROW_NUMBER() OVER \
-             (PARTITION BY wasm_name ORDER BY ledger_sequence, version DESC) AS rn \
+             (PARTITION BY wasm_name ORDER BY ledger_sequence DESC, version DESC) AS rn \
              FROM public.publishes_5 \
            ) AS sub \
          WHERE rn = 1 AND (ledger_sequence, id) >= ($1, $2) \
@@ -122,18 +145,116 @@ async fn get_wasms(pool: web::Data<PgPool>, query: web::Query<QueryParams>) -> H
                 None
             };
 
-            let result: Vec<WasmResult> = rows
-                .into_iter()
-                .map(|r| WasmResult {
-                    author: r.author,
-                    version: r.version,
-                    wasm_name: r.wasm_name,
-                    wasm_hash: r.wasm_hash,
-                })
-                .collect();
-
-            HttpResponse::Ok().json(Response { result, next })
+            HttpResponse::Ok().json(ListResponse { result: rows, next })
         }
+        Err(e) => {
+            eprintln!("Database error: {e}");
+            HttpResponse::InternalServerError().json(ErrorResponse {
+                error: "Internal server error".into(),
+            })
+        }
+    }
+}
+
+async fn get_wasm(pool: web::Data<PgPool>, path: web::Path<String>) -> HttpResponse {
+    let wasm_name = path.into_inner();
+
+    let row = sqlx::query_as::<_, WasmDetail>(
+        "SELECT id, transaction_hash, ledger_sequence, created_at, \
+                author, version, wasm_name, wasm_hash FROM \
+           (SELECT *, ROW_NUMBER() OVER \
+             (PARTITION BY wasm_name ORDER BY ledger_sequence DESC, version DESC) AS rn \
+             FROM public.publishes_5 \
+           ) AS sub \
+         WHERE rn = 1 AND wasm_name = $1",
+    )
+    .bind(&wasm_name)
+    .fetch_optional(pool.get_ref())
+    .await;
+
+    match row {
+        Ok(Some(r)) => HttpResponse::Ok().json(r),
+        Ok(None) => HttpResponse::NotFound().json(ErrorResponse {
+            error: format!("Wasm '{wasm_name}' not found"),
+        }),
+        Err(e) => {
+            eprintln!("Database error: {e}");
+            HttpResponse::InternalServerError().json(ErrorResponse {
+                error: "Internal server error".into(),
+            })
+        }
+    }
+}
+
+async fn get_contracts(pool: web::Data<PgPool>, query: web::Query<QueryParams>) -> HttpResponse {
+    let limit = query.limit.unwrap_or(200);
+    if limit < 2 || limit > 200 {
+        return HttpResponse::BadRequest().json(ErrorResponse {
+            error: "Limit must be an integer between 2 and 200".into(),
+        });
+    }
+
+    let (ledger, cursor) = match parse_cursor(&query.cursor) {
+        Ok(val) => val,
+        Err(resp) => return resp,
+    };
+
+    let rows = sqlx::query_as::<_, ContractResult>(
+        "SELECT id, contract_id, contract_name, deployer, version, wasm_name FROM \
+           (SELECT *, ROW_NUMBER() OVER \
+             (PARTITION BY contract_name ORDER BY ledger_sequence DESC, version DESC) AS rn \
+             FROM public.deploys_5 \
+           ) AS sub \
+         WHERE rn = 1 AND (ledger_sequence, id) >= ($1, $2) \
+         ORDER BY ledger_sequence, id ASC \
+         LIMIT $3",
+    )
+    .bind(ledger)
+    .bind(&cursor)
+    .bind(limit)
+    .fetch_all(pool.get_ref())
+    .await;
+
+    match rows {
+        Ok(rows) => {
+            let next = if rows.len() as i64 == limit {
+                rows.last().map(|r| r.id.clone())
+            } else {
+                None
+            };
+
+            HttpResponse::Ok().json(ListResponse { result: rows, next })
+        }
+        Err(e) => {
+            eprintln!("Database error: {e}");
+            HttpResponse::InternalServerError().json(ErrorResponse {
+                error: "Internal server error".into(),
+            })
+        }
+    }
+}
+
+async fn get_contract(pool: web::Data<PgPool>, path: web::Path<String>) -> HttpResponse {
+    let contract_name = path.into_inner();
+
+    let row = sqlx::query_as::<_, ContractDetail>(
+        "SELECT id, transaction_hash, ledger_sequence, created_at, \
+                contract_id, contract_name, deployer, version, wasm_name FROM \
+           (SELECT *, ROW_NUMBER() OVER \
+             (PARTITION BY contract_name ORDER BY ledger_sequence DESC, version DESC) AS rn \
+             FROM public.deploys_5 \
+           ) AS sub \
+         WHERE rn = 1 AND contract_name = $1",
+    )
+    .bind(&contract_name)
+    .fetch_optional(pool.get_ref())
+    .await;
+
+    match row {
+        Ok(Some(r)) => HttpResponse::Ok().json(r),
+        Ok(None) => HttpResponse::NotFound().json(ErrorResponse {
+            error: format!("Contract '{contract_name}' not found"),
+        }),
         Err(e) => {
             eprintln!("Database error: {e}");
             HttpResponse::InternalServerError().json(ErrorResponse {
@@ -197,7 +318,10 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(pool.clone()))
-            .route("/", web::get().to(get_wasms))
+            .route("/wasms", web::get().to(get_wasms))
+            .route("/wasms/{wasm_name}", web::get().to(get_wasm))
+            .route("/contracts", web::get().to(get_contracts))
+            .route("/contracts/{contract_name}", web::get().to(get_contract))
             .route("/health", web::get().to(health))
     })
     .bind(("0.0.0.0", port))?
