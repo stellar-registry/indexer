@@ -60,7 +60,7 @@ struct ContractRow {
 }
 
 #[derive(Serialize)]
-struct PublishResult {
+struct WasmResult {
     author: Option<String>,
     version: Option<String>,
     wasm_name: Option<String>,
@@ -69,7 +69,7 @@ struct PublishResult {
 
 #[derive(Serialize)]
 struct Response {
-    result: Vec<PublishResult>,
+    result: Vec<WasmResult>,
     next: Option<String>,
 }
 
@@ -115,9 +115,9 @@ async fn get_wasms(pool: web::Data<PgPool>, query: web::Query<QueryParams>) -> H
                 None
             };
 
-            let result: Vec<PublishResult> = rows
+            let result: Vec<WasmResult> = rows
                 .into_iter()
-                .map(|r| PublishResult {
+                .map(|r| WasmResult {
                     author: r.author,
                     version: r.version,
                     wasm_name: r.wasm_name,
