@@ -131,10 +131,9 @@ async fn get_wasms(pool: web::Data<PgPool>, query: web::Query<QueryParams>) -> H
         "SELECT id, author, version, wasm_name, wasm_hash FROM \
            (SELECT *, ROW_NUMBER() OVER \
              (PARTITION BY wasm_name ORDER BY ledger_sequence DESC, \
-              string_to_array(split_part(COALESCE(version, '0.0.0'), '-', 1), '.')::int[] DESC \
+              string_to_array(split_part(COALESCE(version, '0.0.0'), '-', 1), '.')::bigint[] DESC \
              ) AS rn \
              FROM public.publishes_5 \
-             WHERE ledger_sequence >= $1 \
            ) AS sub \
          WHERE rn = 1 AND (ledger_sequence, id) >= ($1, $2) \
          ORDER BY ledger_sequence, id ASC \
@@ -165,11 +164,7 @@ async fn get_wasms(pool: web::Data<PgPool>, query: web::Query<QueryParams>) -> H
     }
 }
 
-async fn fetch_wasm_detail(
-    pool: &PgPool,
-    wasm_name: &str,
-    version: Option<&str>,
-) -> HttpResponse {
+async fn fetch_wasm_detail(pool: &PgPool, wasm_name: &str, version: Option<&str>) -> HttpResponse {
     let row = if let Some(ver) = version {
         sqlx::query_as::<_, WasmDetailRow>(
             "SELECT id, transaction_hash, ledger_sequence, created_at, \
@@ -187,7 +182,7 @@ async fn fetch_wasm_detail(
                     author, version, wasm_name, wasm_hash FROM \
                (SELECT *, ROW_NUMBER() OVER \
                  (PARTITION BY wasm_name ORDER BY ledger_sequence DESC, \
-                  string_to_array(split_part(COALESCE(version, '0.0.0'), '-', 1), '.')::int[] DESC \
+                  string_to_array(split_part(COALESCE(version, '0.0.0'), '-', 1), '.')::bigint[] DESC \
                  ) AS rn \
                  FROM public.publishes_5 \
                ) AS sub \
@@ -204,16 +199,17 @@ async fn fetch_wasm_detail(
                 "SELECT id, author, version, wasm_name, wasm_hash \
                  FROM public.publishes_5 \
                  WHERE wasm_name = $1 \
-                 ORDER BY string_to_array(split_part(COALESCE(version, '0.0.0'), '-', 1), '.')::int[] DESC",
+                 ORDER BY string_to_array(split_part(COALESCE(version, '0.0.0'), '-', 1), '.')::bigint[] DESC",
             )
             .bind(wasm_name)
             .fetch_all(pool)
             .await;
 
             match versions {
-                Ok(v) => {
-                    HttpResponse::Ok().json(WasmDetail { row: detail_row, versions: v })
-                }
+                Ok(v) => HttpResponse::Ok().json(WasmDetail {
+                    row: detail_row,
+                    versions: v,
+                }),
                 Err(e) => {
                     eprintln!("Database error: {e}");
                     HttpResponse::InternalServerError().json(ErrorResponse {
@@ -396,7 +392,10 @@ async fn main() -> std::io::Result<()> {
             .route("/", web::get().to(index))
             .route("/wasms", web::get().to(get_wasms))
             .route("/wasms/{wasm_name}", web::get().to(get_wasm_latest))
-            .route("/wasms/{wasm_name}/v/{version}", web::get().to(get_wasm_version))
+            .route(
+                "/wasms/{wasm_name}/v/{version}",
+                web::get().to(get_wasm_version),
+            )
             .route("/contracts", web::get().to(get_contracts))
             .route("/contracts/{contract_name}", web::get().to(get_contract))
             .route("/health", web::get().to(health))
