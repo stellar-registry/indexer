@@ -362,7 +362,9 @@ async fn index() -> HttpResponse {
 }
 
 async fn health() -> HttpResponse {
-    HttpResponse::Ok().finish()
+    HttpResponse::Ok().json(serde_json::json!({
+      "status": "OK",
+    }))
 }
 
 #[actix_web::main]
