@@ -4,7 +4,7 @@ use_dedicated_ip: false
 sources:
   goldsky_source:
     dataset_name: stellar_testnet.events
-    start_at: 2488
+    start_at: earliest
     type: dataset
     version: 3.0.0
 transforms:

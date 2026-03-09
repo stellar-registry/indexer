@@ -15,6 +15,7 @@ struct WasmResult {
     #[serde(skip)]
     id: String,
     author: Option<String>,
+    channel: Option<String>,
     wasm_version: Option<String>,
     wasm_name: Option<String>,
     wasm_hash: Option<String>,
@@ -29,7 +30,7 @@ struct WasmResult {
 /// transaction_hash | text                        |           | not null |
 /// ledger_sequence  | bigint                      |           | not null |
 /// created_at       | timestamp without time zone |           | not null |
-/// registry_type    | text                        |           |          |
+/// channel          | text                        |           |          |
 /// author           | text                        |           |          |
 /// wasm_version     | text                        |           |          |
 /// wasm_hash        | text                        |           |          |
@@ -41,6 +42,7 @@ struct WasmDetailRow {
     transaction_hash: String,
     ledger_sequence: i64,
     created_at: chrono::NaiveDateTime,
+    channel: Option<String>,
     author: Option<String>,
     wasm_version: Option<String>,
     wasm_name: Option<String>,
@@ -78,7 +80,7 @@ struct ContractResult {
 /// transaction_hash | text                        |           | not null |
 /// ledger_sequence  | bigint                      |           | not null |
 /// created_at       | timestamp without time zone |           | not null |
-/// registry_type    | text                        |           |          |
+/// channel    | text                        |           |          |
 /// wasm_name        | text                        |           |          |
 /// wasm_version     | text                        |           |          |
 /// deployer         | text                        |           |          |
@@ -91,7 +93,7 @@ struct ContractResult {
 ///  transaction_hash | text                        |           | not null |
 ///  ledger_sequence  | bigint                      |           | not null |
 ///  created_at       | timestamp without time zone |           | not null |
-///  registry_type    | text                        |           |          |
+///  channel    | text                        |           |          |
 ///  contract_name    | text                        |           |          |
 ///  contract_id      | text                        |           |          |
 #[derive(sqlx::FromRow, Serialize)]
@@ -123,17 +125,25 @@ async fn get_wasms_legacy(pool: web::Data<PgPool>, query: web::Query<QueryParams
     get_wasms("unverified", pool, query).await
 }
 
-async fn get_wasms_by_type(pool: web::Data<PgPool>, path: web::Path<String>, query: web::Query<QueryParams>) -> HttpResponse {
-    let registry_type = path.into_inner();
-    if registry_type != "main" && registry_type != "unverified" {
+async fn get_wasms_by_type(
+    pool: web::Data<PgPool>,
+    path: web::Path<String>,
+    query: web::Query<QueryParams>,
+) -> HttpResponse {
+    let channel = path.into_inner();
+    if channel != "main" && channel != "unverified" {
         return HttpResponse::BadRequest().json(ErrorResponse {
             error: "Limit must be an integer between 2 and 200".into(),
-        })
+        });
     }
-    get_wasms(&registry_type, pool, query).await
+    get_wasms(&channel, pool, query).await
 }
 
-async fn get_wasms(registry_type: &str, pool: web::Data<PgPool>, query: web::Query<QueryParams>) -> HttpResponse {
+async fn get_wasms(
+    channel: &str,
+    pool: web::Data<PgPool>,
+    query: web::Query<QueryParams>,
+) -> HttpResponse {
     let limit = query.limit.unwrap_or(200);
     if limit < 2 || limit > 200 {
         return HttpResponse::BadRequest().json(ErrorResponse {
@@ -160,13 +170,13 @@ async fn get_wasms(registry_type: &str, pool: web::Data<PgPool>, query: web::Que
              FROM public.v1_published_wasms \
            ) AS sub \
          WHERE rn = 1 AND (ledger_sequence, id) >= ($1, $2) \
-         AND registry_type = $3 \
+         AND channel = $3 \
          ORDER BY ledger_sequence, id ASC \
          LIMIT $4",
     )
     .bind(ledger)
     .bind(&cursor)
-    .bind(registry_type)
+    .bind(channel)
     .bind(limit)
     .fetch_all(pool.get_ref())
     .await;
@@ -190,17 +200,22 @@ async fn get_wasms(registry_type: &str, pool: web::Data<PgPool>, query: web::Que
     }
 }
 
-async fn fetch_wasm_detail(pool: &PgPool, registry_type: &str, wasm_name: &str, version: Option<&str>) -> HttpResponse {
+async fn fetch_wasm_detail(
+    pool: &PgPool,
+    channel: &str,
+    wasm_name: &str,
+    version: Option<&str>,
+) -> HttpResponse {
     let row = if let Some(ver) = version {
         sqlx::query_as::<_, WasmDetailRow>(
             "SELECT id, transaction_hash, ledger_sequence, created_at, \
                     author, wasm_version, wasm_name, wasm_hash \
              FROM public.v1_published_wasms \
-             WHERE wasm_name = $1 AND wasm_version = $2 AND registry_type = $3",
+             WHERE wasm_name = $1 AND wasm_version = $2 AND channel = $3",
         )
         .bind(wasm_name)
         .bind(ver)
-        .bind(registry_type)
+        .bind(channel)
         .fetch_optional(pool)
         .await
     } else {
@@ -211,10 +226,10 @@ async fn fetch_wasm_detail(pool: &PgPool, registry_type: &str, wasm_name: &str, 
                  (PARTITION BY wasm_name ORDER BY ledger_sequence DESC, wasm_version DESC) AS rn \
                  FROM public.v1_published_wasms \
                ) AS sub \
-             WHERE rn = 1 AND wasm_name = $1 AND registry_type = $2",
+             WHERE rn = 1 AND wasm_name = $1 AND channel = $2",
         )
         .bind(wasm_name)
-        .bind(registry_type)
+        .bind(channel)
         .fetch_optional(pool)
         .await
     };
@@ -225,11 +240,11 @@ async fn fetch_wasm_detail(pool: &PgPool, registry_type: &str, wasm_name: &str, 
             let versions = sqlx::query_as::<_, WasmResult>(
                 "SELECT id, author, wasm_version, wasm_name, wasm_hash \
                  FROM public.v1_published_wasms \
-                 WHERE wasm_name = $1 AND registry_type = $2 \
+                 WHERE wasm_name = $1 AND channel = $2 \
                  ORDER BY ledger_sequence DESC, wasm_version DESC",
             )
             .bind(wasm_name)
-            .bind(registry_type)
+            .bind(channel)
             .fetch_all(pool)
             .await;
 
@@ -269,14 +284,17 @@ async fn get_wasm_latest_legacy(pool: web::Data<PgPool>, path: web::Path<String>
     fetch_wasm_detail(pool.get_ref(), "unverified", &wasm_name, None).await
 }
 
-async fn get_wasm_latest(pool: web::Data<PgPool>, path: web::Path<(String, String)>) -> HttpResponse {
-    let (registry_type, wasm_name) = path.into_inner();
-    if registry_type != "main" && registry_type != "unverified" {
+async fn get_wasm_latest(
+    pool: web::Data<PgPool>,
+    path: web::Path<(String, String)>,
+) -> HttpResponse {
+    let (channel, wasm_name) = path.into_inner();
+    if channel != "main" && channel != "unverified" {
         return HttpResponse::BadRequest().json(ErrorResponse {
             error: "Limit must be an integer between 2 and 200".into(),
-        })
+        });
     }
-    fetch_wasm_detail(pool.get_ref(), &registry_type, &wasm_name, None).await
+    fetch_wasm_detail(pool.get_ref(), &channel, &wasm_name, None).await
 }
 
 #[deprecated = "to be removed get_wasm_version"]
@@ -292,31 +310,42 @@ async fn get_wasm_version(
     pool: web::Data<PgPool>,
     path: web::Path<(String, String, String)>,
 ) -> HttpResponse {
-    let (registry_type, wasm_name, version) = path.into_inner();
-    if registry_type != "main" && registry_type != "unverified" {
+    let (channel, wasm_name, version) = path.into_inner();
+    if channel != "main" && channel != "unverified" {
         return HttpResponse::BadRequest().json(ErrorResponse {
             error: "Limit must be an integer between 2 and 200".into(),
-        })
+        });
     }
-    fetch_wasm_detail(pool.get_ref(), &registry_type, &wasm_name, Some(&version)).await
+    fetch_wasm_detail(pool.get_ref(), &channel, &wasm_name, Some(&version)).await
 }
 
 #[deprecated = "to be removed get_contracts"]
-async fn get_contracts_legacy(pool: web::Data<PgPool>, query: web::Query<QueryParams>) -> HttpResponse {
+async fn get_contracts_legacy(
+    pool: web::Data<PgPool>,
+    query: web::Query<QueryParams>,
+) -> HttpResponse {
     fetch_contracts("unverified", pool, query).await
 }
 
-async fn get_contracts(pool: web::Data<PgPool>, path: web::Path<String>, query: web::Query<QueryParams>) -> HttpResponse {
-    let registry_type = path.into_inner();
-    if registry_type != "main" && registry_type != "unverified" {
+async fn get_contracts(
+    pool: web::Data<PgPool>,
+    path: web::Path<String>,
+    query: web::Query<QueryParams>,
+) -> HttpResponse {
+    let channel = path.into_inner();
+    if channel != "main" && channel != "unverified" {
         return HttpResponse::BadRequest().json(ErrorResponse {
             error: "Limit must be an integer between 2 and 200".into(),
-        })
+        });
     }
-    fetch_contracts(&registry_type, pool, query).await
+    fetch_contracts(&channel, pool, query).await
 }
 
-async fn fetch_contracts(registry_type: &str, pool: web::Data<PgPool>, query: web::Query<QueryParams>) -> HttpResponse {
+async fn fetch_contracts(
+    channel: &str,
+    pool: web::Data<PgPool>,
+    query: web::Query<QueryParams>,
+) -> HttpResponse {
     let limit = query.limit.unwrap_or(200);
     if limit < 2 || limit > 200 {
         return HttpResponse::BadRequest().json(ErrorResponse {
@@ -341,13 +370,13 @@ async fn fetch_contracts(registry_type: &str, pool: web::Data<PgPool>, query: we
             LEFT JOIN public.v1_registered_wasms rw
               ON dc.contract_id = rw.contract_id
             WHERE (dc.ledger_sequence, dc.id) >= ($1, $2) \
-            AND dc.registry_type = $3 \
+            AND dc.channel = $3 \
             ORDER BY dc.ledger_sequence, dc.id ASC \
             LIMIT $4",
     )
     .bind(ledger)
     .bind(&cursor)
-    .bind(&registry_type)
+    .bind(&channel)
     .bind(limit)
     .fetch_all(pool.get_ref())
     .await;
@@ -372,23 +401,33 @@ async fn fetch_contracts(registry_type: &str, pool: web::Data<PgPool>, query: we
 }
 
 #[deprecated = "to be removed get_contracts"]
-async fn get_single_contract_legacy(pool: web::Data<PgPool>, path: web::Path<String>) -> HttpResponse {
+async fn get_single_contract_legacy(
+    pool: web::Data<PgPool>,
+    path: web::Path<String>,
+) -> HttpResponse {
     let contract_name = path.into_inner();
 
     fetch_single_contract("unverified", &contract_name, pool).await
 }
 
-async fn get_single_contract(pool: web::Data<PgPool>, path: web::Path<(String, String)>) -> HttpResponse {
-    let (registry_type, contract_name) = path.into_inner();
-    if registry_type != "main" && registry_type != "unverified" {
+async fn get_single_contract(
+    pool: web::Data<PgPool>,
+    path: web::Path<(String, String)>,
+) -> HttpResponse {
+    let (channel, contract_name) = path.into_inner();
+    if channel != "main" && channel != "unverified" {
         return HttpResponse::BadRequest().json(ErrorResponse {
             error: "Limit must be an integer between 2 and 200".into(),
-        })
+        });
     }
-    fetch_single_contract(&registry_type, &contract_name, pool).await
+    fetch_single_contract(&channel, &contract_name, pool).await
 }
 
-async fn fetch_single_contract(registry_type: &str, contract_name: &str, pool: web::Data<PgPool>) -> HttpResponse {
+async fn fetch_single_contract(
+    channel: &str,
+    contract_name: &str,
+    pool: web::Data<PgPool>,
+) -> HttpResponse {
     let row = sqlx::query_as::<_, ContractDetail>(
         "SELECT
                 dc.id,
@@ -403,10 +442,10 @@ async fn fetch_single_contract(registry_type: &str, contract_name: &str, pool: w
             FROM public.v1_deployed_contracts dc
             LEFT JOIN public.v1_registered_wasms rw
               ON dc.contract_id = rw.contract_id
-            WHERE contract_name = $1 AND dc.registry_type = $2",
+            WHERE contract_name = $1 AND dc.channel = $2",
     )
     .bind(&contract_name)
-    .bind(&registry_type)
+    .bind(&channel)
     .fetch_optional(pool.get_ref())
     .await;
 
@@ -459,11 +498,11 @@ async fn index() -> HttpResponse {
     HttpResponse::Ok().json(serde_json::json!({
         "name": "Registry Indexer API",
         "endpoints": [
-            { "method": "GET", "path": "/v1/{registry_type}/wasms", "description": "List published wasms, where registry_type is either 'main' or 'unverified'" },
-            { "method": "GET", "path": "/v1/{registry_type}/wasms/{wasm_name}", "description": "Get details for the latest version of a specific wasm" },
-            { "method": "GET", "path": "/v1/{registry_type}/wasms/{wasm_name}/v/{version}", "description": "Get details for a specific version of a wasm" },
-            { "method": "GET", "path": "/v1/{registry_type}/contracts", "description": "List deployed contracts" },
-            { "method": "GET", "path": "/v1/{registry_type}/contracts/{contract_name}", "description": "Get details for a specific contract" },
+            { "method": "GET", "path": "/v1/{channel}/wasms", "description": "List published wasms, where channel is either 'main' or 'unverified'" },
+            { "method": "GET", "path": "/v1/{channel}/wasms/{wasm_name}", "description": "Get details for the latest version of a specific wasm" },
+            { "method": "GET", "path": "/v1/{channel}/wasms/{wasm_name}/v/{version}", "description": "Get details for a specific version of a wasm" },
+            { "method": "GET", "path": "/v1/{channel}/contracts", "description": "List deployed contracts" },
+            { "method": "GET", "path": "/v1/{channel}/contracts/{contract_name}", "description": "Get details for a specific contract" },
             { "method": "GET", "path": "/health", "description": "Health check" }
         ]
     }))
@@ -495,21 +534,30 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(pool.clone()))
             .route("/", web::get().to(index))
             .route("/wasms", web::get().to(get_wasms_legacy))
-            .route("/v1/{registry_type}/wasms", web::get().to(get_wasms_by_type))
+            .route("/v1/{channel}/wasms", web::get().to(get_wasms_by_type))
             .route("/wasms/{wasm_name}", web::get().to(get_wasm_latest_legacy))
-            .route("/v1/{registry_type}/wasms/{wasm_name}", web::get().to(get_wasm_latest))
+            .route(
+                "/v1/{channel}/wasms/{wasm_name}",
+                web::get().to(get_wasm_latest),
+            )
             .route(
                 "/wasms/{wasm_name}/v/{version}",
                 web::get().to(get_wasm_version_legacy),
             )
             .route(
-                "/v1/{registry_type}/wasms/{wasm_name}/v/{version}",
+                "/v1/{channel}/wasms/{wasm_name}/v/{version}",
                 web::get().to(get_wasm_version),
             )
             .route("/contracts", web::get().to(get_contracts_legacy))
-            .route("/v1/{registry_type}/contracts", web::get().to(get_contracts))
-            .route("/contracts/{contract_name}", web::get().to(get_single_contract_legacy))
-            .route("/v1/{registry_type}/contracts/{contract_name}", web::get().to(get_single_contract))
+            .route("/v1/{channel}/contracts", web::get().to(get_contracts))
+            .route(
+                "/contracts/{contract_name}",
+                web::get().to(get_single_contract_legacy),
+            )
+            .route(
+                "/v1/{channel}/contracts/{contract_name}",
+                web::get().to(get_single_contract),
+            )
             .route("/health", web::get().to(health))
     })
     .bind(("0.0.0.0", port))?
