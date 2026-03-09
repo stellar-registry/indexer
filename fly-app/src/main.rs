@@ -509,7 +509,7 @@ async fn main() -> std::io::Result<()> {
             .route("/contracts", web::get().to(get_contracts_legacy))
             .route("/v1/{registry_type}/contracts", web::get().to(get_contracts))
             .route("/contracts/{contract_name}", web::get().to(get_single_contract_legacy))
-            .route("/v1/{registry_type}/contracts/{contract_name}", web::get().to(get_single_contract_legacy))
+            .route("/v1/{registry_type}/contracts/{contract_name}", web::get().to(get_single_contract))
             .route("/health", web::get().to(health))
     })
     .bind(("0.0.0.0", port))?
