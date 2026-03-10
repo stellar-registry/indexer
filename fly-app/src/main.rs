@@ -164,7 +164,7 @@ async fn get_wasms(
     // With adding an extra 'z' symbol to ensure string is lexicographically greater
     // to go to the next transaction in the same ledger (if any)
     let rows = sqlx::query_as::<_, WasmResult>(
-        "SELECT id, author, wasm_version, wasm_name, wasm_hash FROM \
+        "SELECT id, author, wasm_version, wasm_name, wasm_hash, channel FROM \
            (SELECT *, ROW_NUMBER() OVER \
              (PARTITION BY wasm_name ORDER BY ledger_sequence DESC, wasm_version DESC) AS rn \
              FROM public.v1_published_wasms \
@@ -209,7 +209,7 @@ async fn fetch_wasm_detail(
     let row = if let Some(ver) = version {
         sqlx::query_as::<_, WasmDetailRow>(
             "SELECT id, transaction_hash, ledger_sequence, created_at, \
-                    author, wasm_version, wasm_name, wasm_hash \
+                    author, wasm_version, wasm_name, wasm_hash, channel \
              FROM public.v1_published_wasms \
              WHERE wasm_name = $1 AND wasm_version = $2 AND channel = $3",
         )
