@@ -137,9 +137,9 @@ async fn get_wasms(
     query: web::Query<QueryParams>,
 ) -> HttpResponse {
     let limit = query.limit.unwrap_or(200);
-    if limit < 2 || limit > 200 {
+    if limit < 1 || limit > 200 {
         return HttpResponse::BadRequest().json(ErrorResponse {
-            error: "Limit must be an integer between 2 and 200".into(),
+            error: "Limit must be an integer between 1 and 200".into(),
         });
     }
 
@@ -312,9 +312,9 @@ async fn get_contracts_main(
     query: web::Query<QueryParams>,
 ) -> HttpResponse {
     let limit = query.limit.unwrap_or(200);
-    if limit < 2 || limit > 200 {
+    if limit < 1 || limit > 200 {
         return HttpResponse::BadRequest().json(ErrorResponse {
-            error: "Limit must be an integer between 2 and 200".into(),
+            error: "Limit must be an integer between 1 and 200".into(),
         });
     }
 
