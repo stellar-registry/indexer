@@ -325,18 +325,18 @@ async fn get_contracts_main(
 
     let rows = sqlx::query_as::<_, ContractResult>(
         "SELECT
-                dc.id,
-                dc.contract_id,
-                dc.channel,
+                rw.id,
+                rw.contract_id,
+                rw.channel,
                 rw.contract_name,
                 dc.deployer,
                 dc.wasm_version,
                 dc.wasm_name
-            FROM public.v1_deployed_contracts dc
-            LEFT JOIN public.v1_registered_wasms rw
-              ON dc.contract_id = rw.contract_id
-            WHERE (dc.ledger_sequence, dc.id) >= ($1, $2) \
-            ORDER BY dc.ledger_sequence, dc.id ASC \
+            FROM public.v1_registered_wasms rw
+            LEFT JOIN public.v1_deployed_contracts dc
+              ON rw.contract_id = dc.contract_id
+            WHERE (rw.ledger_sequence, rw.id) >= ($1, $2)
+            ORDER BY rw.ledger_sequence, rw.id ASC
             LIMIT $3",
     )
     .bind(ledger)
@@ -393,20 +393,20 @@ async fn fetch_single_contract(
 ) -> HttpResponse {
     let row = sqlx::query_as::<_, ContractDetail>(
         "SELECT
-                dc.id,
-                dc.transaction_hash,
-                dc.ledger_sequence,
-                dc.created_at,
-                dc.contract_id,
+                rw.id,
+                rw.transaction_hash,
+                rw.ledger_sequence,
+                rw.created_at,
+                rw.contract_id,
                 rw.contract_name,
                 dc.deployer,
                 dc.wasm_version,
                 dc.wasm_name,
-                dc.channel
-            FROM public.v1_deployed_contracts dc
-            LEFT JOIN public.v1_registered_wasms rw
-              ON dc.contract_id = rw.contract_id
-            WHERE contract_name = $1 AND dc.channel = $2",
+                rw.channel
+            FROM public.v1_registered_wasms rw
+            LEFT JOIN public.v1_deployed_contracts dc
+              ON rw.contract_id = dc.contract_id
+            WHERE contract_name = $1 AND rw.channel = $2",
     )
     .bind(&contract_name)
     .bind(&channel)
