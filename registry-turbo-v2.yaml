@@ -1,10 +1,10 @@
-name: registryturbo
+name: registry-turbo-v2
 resource_size: s
 use_dedicated_ip: false
 sources:
   goldsky_source:
     dataset_name: stellar_testnet.events
-    start_at: 2487
+    start_block: 1589244
     type: dataset
     version: 1.2.0
 transforms:
@@ -12,21 +12,21 @@ transforms:
     primary_key: id
     sql: >-
       --  stellar registry fetch-contract-id registry  
-      'CBFFTTX7QKA76FS4LHHQG54BC7JF5RMEX4RTNNJ5KEL76LYHVO3E3OEE' --  stellar
+      'CCA256DWBJJEEYXAWQHP5N4ZAJ2NW4P5T52LZCGC766Q5XHFVNQBMFZV' --  stellar
       registry fetch-contract-id unverified
-      'CAXY4DZ4OM6XLHGXGWETIHXPJEJKGUZNWSBENC5XHSL3SSMCIO73U7SQ'
+      'CAMLHKQHNZO2IOIBFUF5BGZ2V62BMS5QCWFFGRCB4NOB3G5OMDA7SGZN'
 
       SELECT 
           *,
           CASE 
-              WHEN contract_id = 'CBFFTTX7QKA76FS4LHHQG54BC7JF5RMEX4RTNNJ5KEL76LYHVO3E3OEE' THEN 'main'
-              WHEN contract_id = 'CAXY4DZ4OM6XLHGXGWETIHXPJEJKGUZNWSBENC5XHSL3SSMCIO73U7SQ' THEN 'unverified'
+              WHEN contract_id = 'CCA256DWBJJEEYXAWQHP5N4ZAJ2NW4P5T52LZCGC766Q5XHFVNQBMFZV' THEN 'main'
+              WHEN contract_id = 'CAMLHKQHNZO2IOIBFUF5BGZ2V62BMS5QCWFFGRCB4NOB3G5OMDA7SGZN' THEN 'unverified'
           END AS channel
       FROM goldsky_source 
 
       WHERE contract_id IN (
-          'CBFFTTX7QKA76FS4LHHQG54BC7JF5RMEX4RTNNJ5KEL76LYHVO3E3OEE', 
-          'CAXY4DZ4OM6XLHGXGWETIHXPJEJKGUZNWSBENC5XHSL3SSMCIO73U7SQ'
+          'CCA256DWBJJEEYXAWQHP5N4ZAJ2NW4P5T52LZCGC766Q5XHFVNQBMFZV', 
+          'CAMLHKQHNZO2IOIBFUF5BGZ2V62BMS5QCWFFGRCB4NOB3G5OMDA7SGZN'
       ) AND in_successful_contract_call = true  AND transaction_successful =
       true
     type: sql
@@ -168,61 +168,126 @@ transforms:
     primary_key: id
     sql: |-
       SELECT 
-          id,
-          transaction_hash, 
-          ledger_sequence, 
-          created_at, 
-          channel,
-
-          -- Contract Name (Looking for 'contract_name' key, extracting 'string' value)
+          id, transaction_hash, ledger_sequence, created_at, channel,
+          -- contract_name (string)
           CASE
-              WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'contract_name' 
-                  THEN JSON_VALUE(data, '$.map[0].val.string')
-              WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'contract_name' 
-                  THEN JSON_VALUE(data, '$.map[1].val.string')
+              WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'contract_name' THEN JSON_VALUE(data, '$.map[0].val.string')
+              WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'contract_name' THEN JSON_VALUE(data, '$.map[1].val.string')
+              WHEN JSON_VALUE(data, '$.map[2].key.symbol') = 'contract_name' THEN JSON_VALUE(data, '$.map[2].val.string')
+              WHEN JSON_VALUE(data, '$.map[3].key.symbol') = 'contract_name' THEN JSON_VALUE(data, '$.map[3].val.string')
           END AS contract_name,
-
-          -- Contract ID (Looking for 'contract_id' key, extracting 'address' value)
+          -- contract_id (address)
           CASE
-              WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'contract_id' 
-                  THEN JSON_VALUE(data, '$.map[0].val.address')
-              WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'contract_id' 
-                  THEN JSON_VALUE(data, '$.map[1].val.address')
-          END AS contract_id
-
+              WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'contract_id' THEN JSON_VALUE(data, '$.map[0].val.address')
+              WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'contract_id' THEN JSON_VALUE(data, '$.map[1].val.address')
+              WHEN JSON_VALUE(data, '$.map[2].key.symbol') = 'contract_id' THEN JSON_VALUE(data, '$.map[2].val.address')
+              WHEN JSON_VALUE(data, '$.map[3].key.symbol') = 'contract_id' THEN JSON_VALUE(data, '$.map[3].val.address')
+          END AS contract_id,
+          -- sac (bool)
+          CASE
+              WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'sac' THEN CAST(JSON_VALUE(data, '$.map[0].val.bool') AS BOOLEAN)
+              WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'sac' THEN CAST(JSON_VALUE(data, '$.map[1].val.bool') AS BOOLEAN)
+              WHEN JSON_VALUE(data, '$.map[2].key.symbol') = 'sac' THEN CAST(JSON_VALUE(data, '$.map[2].val.bool') AS BOOLEAN)
+              WHEN JSON_VALUE(data, '$.map[3].key.symbol') = 'sac' THEN CAST(JSON_VALUE(data, '$.map[3].val.bool') AS BOOLEAN)
+          END AS sac,
+          -- wasm_hash (bytes/hex)
+          CASE
+              WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'wasm_hash' THEN JSON_VALUE(data, '$.map[0].val.bytes')
+              WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'wasm_hash' THEN JSON_VALUE(data, '$.map[1].val.bytes')
+              WHEN JSON_VALUE(data, '$.map[2].key.symbol') = 'wasm_hash' THEN JSON_VALUE(data, '$.map[2].val.bytes')
+              WHEN JSON_VALUE(data, '$.map[3].key.symbol') = 'wasm_hash' THEN JSON_VALUE(data, '$.map[3].val.bytes')
+          END AS wasm_hash
       FROM transform_2_events_with_command_name
       WHERE command = 'register'
     type: sql
+  transform_3_update_owner:
+    primary_key: id
+    sql: |-
+      SELECT 
+          id, transaction_hash, ledger_sequence, created_at, channel,
+          CASE
+              WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'contract_name' THEN JSON_VALUE(data, '$.map[0].val.string')
+              WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'contract_name' THEN JSON_VALUE(data, '$.map[1].val.string')
+          END AS contract_name,
+          CASE
+              WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'new_owner' THEN JSON_VALUE(data, '$.map[0].val.address')
+              WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'new_owner' THEN JSON_VALUE(data, '$.map[1].val.address')
+          END AS new_owner
+      FROM transform_2_events_with_command_name
+      WHERE command = 'update_owner'
+    type: sql
+  transform_3_update_address:
+    primary_key: id
+    sql: |-
+      SELECT 
+          id, transaction_hash, ledger_sequence, created_at, channel,
+          CASE
+              WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'contract_name' THEN JSON_VALUE(data, '$.map[0].val.string')
+              WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'contract_name' THEN JSON_VALUE(data, '$.map[1].val.string')
+          END AS contract_name,
+          CASE
+              WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'new_address' THEN JSON_VALUE(data, '$.map[0].val.address')
+              WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'new_address' THEN JSON_VALUE(data, '$.map[1].val.address')
+          END AS new_address
+      FROM transform_2_events_with_command_name
+      WHERE command = 'update_address';
+    type: sql
+  transform_3_rename:
+    primary_key: id
+    sql: |-
+      SELECT 
+          id, transaction_hash, ledger_sequence, created_at, channel,
+          CASE
+              WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'old_name' THEN JSON_VALUE(data, '$.map[0].val.string')
+              WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'old_name' THEN JSON_VALUE(data, '$.map[1].val.string')
+          END AS old_name,
+          CASE
+              WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'new_name' THEN JSON_VALUE(data, '$.map[0].val.string')
+              WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'new_name' THEN JSON_VALUE(data, '$.map[1].val.string')
+          END AS new_name
+      FROM transform_2_events_with_command_name
+      WHERE command = 'rename';
+    type: sql
 sinks:
   deploy_events_pg:
-    batch_flush_interval: null
-    batch_size: null
     from: transform_3_deploy_events
     schema: public
     secret_name: HOSTED_POSTGRES_CMJD1KI8O0
-    table: v2_deployed_contracts
+    table: v3_deployed_contracts
     type: postgres
   publish_events_pg:
-    batch_flush_interval: null
-    batch_size: null
     from: transform_3_publish_events
     schema: public
     secret_name: HOSTED_POSTGRES_CMJD1KI8O0
-    table: v2_published_wasms
+    table: v3_published_wasms
     type: postgres
   raw_events_backup:
-    batch_flush_interval: null
-    batch_size: null
     from: transform_1_events
     schema: public
     secret_name: HOSTED_POSTGRES_CMJD1KI8O0
-    table: v2_raw_events_backup
+    table: v3_raw_events_backup
     type: postgres
   register_events_pg:
-    batch_flush_interval: null
-    batch_size: null
     from: transform_3_register_events
     schema: public
     secret_name: HOSTED_POSTGRES_CMJD1KI8O0
-    table: v2_registered_contracts
+    table: v3_registered_contracts
+    type: postgres
+  update_owner_events_pg:
+    from: transform_3_update_owner
+    schema: public
+    secret_name: HOSTED_POSTGRES_CMJD1KI8O0
+    table: v3_update_owner
+    type: postgres
+  update_address_events_pg:
+    from: transform_3_update_address
+    schema: public
+    secret_name: HOSTED_POSTGRES_CMJD1KI8O0
+    table: v3_update_address
+    type: postgres
+  rename_events_pg:
+    from: transform_3_rename
+    schema: public
+    secret_name: HOSTED_POSTGRES_CMJD1KI8O0
+    table: v3_rename
     type: postgres
