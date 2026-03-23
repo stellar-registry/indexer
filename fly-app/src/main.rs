@@ -78,6 +78,8 @@ struct ContractResult {
     deployer: Option<String>,
     wasm_version: Option<String>,
     wasm_name: Option<String>,
+    #[serde(rename = "is_stellar_asset_contract")]
+    sac: Option<bool>
 }
 
 /// Full detail for /contracts/{contract_name} endpoint
@@ -119,6 +121,8 @@ struct ContractDetail {
     deployer: Option<String>,
     wasm_version: Option<String>,
     wasm_name: Option<String>,
+    #[serde(rename = "is_stellar_asset_contract")]
+    sac: Option<bool>
 }
 
 #[derive(Serialize)]
@@ -325,18 +329,21 @@ async fn get_contracts_main(
 
     let rows = sqlx::query_as::<_, ContractResult>(
         "SELECT
-                rw.id,
-                rw.contract_id,
-                rw.channel,
-                rw.contract_name,
-                dc.deployer,
-                dc.wasm_version,
-                dc.wasm_name
-            FROM public.v3_registered_contracts rw
-            LEFT JOIN public.v3_deployed_contracts dc
-              ON rw.contract_id = dc.contract_id
-            WHERE (rw.ledger_sequence, rw.id) >= ($1, $2)
-            ORDER BY rw.ledger_sequence, rw.id ASC
+                registered.id,
+                registered.contract_id,
+                registered.channel,
+                registered.contract_name,
+                registered.sac,
+                deployed.deployer,
+                wasms.wasm_version,
+                wasms.wasm_name
+            FROM public.v3_registered_contracts registered
+            LEFT JOIN public.v3_published_wasms wasms
+              ON registered.wasm_hash = wasms.wasm_hash
+            LEFT JOIN public.v3_deployed_contracts deployed
+              ON registered.contract_id = deployed.contract_id
+            WHERE (registered.ledger_sequence, registered.id) >= ($1, $2)
+            ORDER BY registered.ledger_sequence, registered.id ASC
             LIMIT $3",
     )
     .bind(ledger)
@@ -393,20 +400,23 @@ async fn fetch_single_contract(
 ) -> HttpResponse {
     let row = sqlx::query_as::<_, ContractDetail>(
         "SELECT
-                rw.id,
-                rw.transaction_hash,
-                rw.ledger_sequence,
-                rw.created_at,
-                rw.contract_id,
-                rw.contract_name,
-                dc.deployer,
-                dc.wasm_version,
-                dc.wasm_name,
-                rw.channel
-            FROM public.v3_registered_contracts rw
-            LEFT JOIN public.v3_deployed_contracts dc
-              ON rw.contract_id = dc.contract_id
-            WHERE contract_name = $1 AND rw.channel = $2",
+                registered.id,
+                registered.transaction_hash,
+                registered.ledger_sequence,
+                registered.created_at,
+                registered.contract_id,
+                registered.contract_name,
+                registered.channel,
+                registered.sac,
+                deployed.deployer,
+                wasms.wasm_version,
+                wasms.wasm_name
+            FROM public.v3_registered_contracts registered
+            LEFT JOIN public.v3_published_wasms wasms
+              ON registered.wasm_hash = wasms.wasm_hash
+            LEFT JOIN public.v3_deployed_contracts deployed
+              ON registered.contract_id = deployed.contract_id
+            WHERE contract_name = $1 AND registered.channel = $2",
     )
     .bind(&contract_name)
     .bind(&channel)
