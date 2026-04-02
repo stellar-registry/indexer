@@ -469,15 +469,27 @@ fn parse_cursor(cursor: &Option<String>) -> Result<(i64, String), HttpResponse> 
 }
 
 async fn index() -> HttpResponse {
+    // Version status: current | deprecated | sunset
     HttpResponse::Ok().json(serde_json::json!({
         "name": "Registry Indexer API",
+        "versions": [
+            { "version": "v1", "path": "/v1", "status": "current" }
+        ]
+    }))
+}
+
+async fn index_v1() -> HttpResponse {
+    HttpResponse::Ok().json(serde_json::json!({
+        "name": "Registry Indexer API v1",
         "endpoints": [
-            { "method": "GET", "path": "/v1/wasms", "description": "List published wasms" },
-            { "method": "GET", "path": "/v1/wasms/{wasm_name}", "description": "Get details for the latest version of a specific wasm. Note that a full wasm name may include channel, e.g. 'unverified/hello-world'" },
-            { "method": "GET", "path": "/v1/wasms/{wasm_name}/v/{version}", "description": "Get details for a specific version of a wasm" },
-            { "method": "GET", "path": "/v1/contracts", "description": "List deployed contracts" },
-            { "method": "GET", "path": "/v1/contracts/{contract_name}", "description": "Get details for a specific contract" },
-            { "method": "GET", "path": "/health", "description": "Health check" }
+            { "method": "GET", "path": "/v1/wasms", "description": "List all published wasms (latest version per name, main channel)" },
+            { "method": "GET", "path": "/v1/wasms/{wasm_name}", "description": "Get the latest version of a wasm (main channel)" },
+            { "method": "GET", "path": "/v1/wasms/{channel}/{wasm_name}", "description": "Get the latest version of a wasm for a specific channel. Supported channels: main, unverified" },
+            { "method": "GET", "path": "/v1/wasms/{wasm_name}/v/{version}", "description": "Get a specific version of a wasm (main channel)" },
+            { "method": "GET", "path": "/v1/wasms/{channel}/{wasm_name}/v/{version}", "description": "Get a specific version of a wasm for a specific channel. Supported channels: main, unverified" },
+            { "method": "GET", "path": "/v1/contracts", "description": "List all deployed contracts (main channel)" },
+            { "method": "GET", "path": "/v1/contracts/{contract_name}", "description": "Get details for a deployed contract (main channel)" },
+            { "method": "GET", "path": "/v1/contracts/{channel}/{contract_name}", "description": "Get details for a deployed contract for a specific channel. Supported channels: main, unverified" },
         ]
     }))
 }
@@ -507,6 +519,7 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .app_data(web::Data::new(pool.clone()))
             .route("/", web::get().to(index))
+            .route("/v1", web::get().to(index_v1))
             .route("/v1/wasms", web::get().to(get_wasms))
             .route("/v1/wasms/{wasm_name}", web::get().to(get_wasm_main_channel))
             .route(
