@@ -1,7 +1,7 @@
 use actix_web::{web, App, HttpResponse, HttpServer};
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgPoolOptions;
-use sqlx::PgPool;
+use sqlx::{Execute, PgPool};
 
 #[derive(Deserialize)]
 struct QueryParams {
@@ -20,7 +20,6 @@ struct WasmResult {
     wasm_name: Option<String>,
     wasm_hash: Option<String>,
 }
-
 
 /// Slim result for versions array
 #[derive(sqlx::FromRow, Serialize)]
@@ -79,7 +78,7 @@ struct ContractResult {
     wasm_version: Option<String>,
     wasm_name: Option<String>,
     #[serde(rename = "is_stellar_asset_contract")]
-    sac: Option<bool>
+    sac: Option<bool>,
 }
 
 /// Full detail for /contracts/{contract_name} endpoint
@@ -100,6 +99,7 @@ struct ContractResult {
 /// contract_id      | text                        |           |          |
 /// ```
 /// And table `v3_registered_contracts`
+/// ```
 ///       Column      |            Type             | Collation | Nullable | Default
 /// ------------------+-----------------------------+-----------+----------+---------
 ///  id               | text                        |           | not null |
@@ -109,6 +109,7 @@ struct ContractResult {
 ///  channel    | text                        |           |          |
 ///  contract_name    | text                        |           |          |
 ///  contract_id      | text                        |           |          |
+/// ```
 #[derive(sqlx::FromRow, Serialize)]
 struct ContractDetail {
     id: String,
@@ -122,7 +123,28 @@ struct ContractDetail {
     wasm_version: Option<String>,
     wasm_name: Option<String>,
     #[serde(rename = "is_stellar_asset_contract")]
-    sac: Option<bool>
+    sac: Option<bool>,
+}
+
+#[derive(sqlx::FromRow, Serialize)]
+struct ContractDeployDetail {
+    contract_id: Option<String>,
+    contract_name: Option<String>,
+    channel: Option<String>,
+    deployer: Option<String>,
+    #[serde(serialize_with = "serialize_raw")]
+    operation_body: Option<String>,
+}
+
+pub fn serialize_raw<S: serde::Serializer>(val: &Option<String>, s: S) -> Result<S::Ok, S::Error> {
+    match val {
+        None => s.serialize_none(),
+        Some(raw) => {
+            let v: serde_json::Value = serde_json::from_str(raw)
+                .map_err(serde::ser::Error::custom)?;
+            v.serialize(s)
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -136,10 +158,7 @@ struct ErrorResponse {
     error: String,
 }
 
-async fn get_wasms(
-    pool: web::Data<PgPool>,
-    query: web::Query<QueryParams>,
-) -> HttpResponse {
+async fn get_wasms(pool: web::Data<PgPool>, query: web::Query<QueryParams>) -> HttpResponse {
     let limit = query.limit.unwrap_or(200);
     if limit < 1 || limit > 200 {
         return HttpResponse::BadRequest().json(ErrorResponse {
@@ -437,6 +456,65 @@ async fn fetch_single_contract(
     }
 }
 
+async fn get_contract_deploy_detail(
+    pool: web::Data<PgPool>,
+    path: web::Path<(String, String)>,
+) -> HttpResponse {
+    let (channel, contract_name) = path.into_inner();
+    if channel != "main" && channel != "unverified" {
+        return HttpResponse::BadRequest().json(ErrorResponse {
+            error: "Limit must be an integer between 2 and 200".into(),
+        });
+    }
+    fetch_single_contract_detail(&channel, &contract_name, pool).await
+}
+
+async fn fetch_single_contract_detail(
+    channel: &str,
+    contract_name: &str,
+    pool: web::Data<PgPool>,
+) -> HttpResponse {
+    let row = sqlx::query_as::<_, ContractDeployDetail>(
+        "SELECT
+                registered.contract_id,
+                registered.contract_name,
+                registered.channel,
+                deployed.deployer,
+                raw_event.operation_body
+            FROM public.v3_registered_contracts registered
+            LEFT JOIN public.v3_deployed_contracts deployed
+              ON registered.contract_id = deployed.contract_id
+            LEFT JOIN public.v3_raw_events_backup raw_event
+              ON deployed.transaction_hash = raw_event.contract_id
+            WHERE contract_name = $1 AND registered.channel = $2",
+    )
+    .bind(&contract_name)
+    .bind(&channel)
+    .fetch_optional(pool.get_ref())
+    .await;
+
+    match row {
+        Ok(Some(r)) => {
+            if r.operation_body.is_some() {
+                HttpResponse::Ok().json(r)
+            } else {
+                HttpResponse::NotFound().json(ErrorResponse {
+                    error: format!("Contract '{contract_name}' deploy details are not found"),
+                })
+            }
+        }
+        Ok(None) => HttpResponse::NotFound().json(ErrorResponse {
+            error: format!("Contract '{contract_name}' not found"),
+        }),
+        Err(e) => {
+            eprintln!("Database error: {e}");
+            HttpResponse::InternalServerError().json(ErrorResponse {
+                error: "Internal server error".into(),
+            })
+        }
+    }
+}
+
 fn parse_cursor(cursor: &Option<String>) -> Result<(i64, String), HttpResponse> {
     let Some(cursor) = cursor else {
         return Ok((0, String::new()));
@@ -464,7 +542,7 @@ fn parse_cursor(cursor: &Option<String>) -> Result<(i64, String), HttpResponse> 
     // `id` format is <ledger>-<tx hash>-op-<op number>-event-<event number>
     // Append 'z' to make the cursor lexicographically greater, advancing past
     // the current transaction within the same ledger.
-    let cursor = format!("{}-{}-z", parts[0], parts[1]);
+    let cursor = format!("{}-z", cursor);
     Ok((ledger, cursor))
 }
 
@@ -521,7 +599,10 @@ async fn main() -> std::io::Result<()> {
             .route("/", web::get().to(index))
             .route("/v1", web::get().to(index_v1))
             .route("/v1/wasms", web::get().to(get_wasms))
-            .route("/v1/wasms/{wasm_name}", web::get().to(get_wasm_main_channel))
+            .route(
+                "/v1/wasms/{wasm_name}",
+                web::get().to(get_wasm_main_channel),
+            )
             .route(
                 "/v1/wasms/{channel}/{wasm_name}",
                 web::get().to(get_wasm_latest),
@@ -542,6 +623,10 @@ async fn main() -> std::io::Result<()> {
             .route(
                 "/v1/contracts/{channel}/{contract_name}",
                 web::get().to(get_single_contract),
+            )
+            .route(
+                "/v1/contract_deploy_details/{channel}/{contract_name}",
+                web::get().to(get_contract_deploy_detail),
             )
             .route("/health", web::get().to(health))
     })
