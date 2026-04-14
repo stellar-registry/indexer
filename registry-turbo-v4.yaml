@@ -5,7 +5,7 @@ job: false
 sources:
   goldsky_source:
     dataset_name: stellar_testnet.events
-    start_block: 1589244
+    start_at: 1589244
     type: dataset
     version: 1.2.0
 transforms:
