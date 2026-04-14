@@ -5,7 +5,7 @@ job: false
 sources:
   goldsky_source:
     dataset_name: stellar_testnet.events
-    start_at: 2036131
+    start_at: 2038000
     type: dataset
     version: 1.2.0
 transforms:
@@ -16,6 +16,7 @@ transforms:
       FROM goldsky_source
       WHERE in_successful_contract_call = true
         AND transaction_successful = true
+        AND id NOT LIKE '%-op-none-%'
         AND JSON_VALUE(topics, '$[0].symbol') IN (
               'deploy',
               'publish',
@@ -268,7 +269,7 @@ transforms:
           END AS channel
       FROM transform_2_events_with_command_name
       WHERE command = 'sub_reg'
-        AND emitter_contract_id = 'CB7WYFH2AGIDCNYU2QZXYHORI6GYJBJYX33Z3WKKRVGVXAA2SYA76J2W'
+        AND emitter_contract_id = 'CBT6FE6WLI3IBZPKQ4JJRHD5LIVUKNSGOT4B7CWMYTJMTCQOGUJH5JTI'
     type: sql
 sinks:
   deploy_events_pg:
