@@ -5,49 +5,40 @@ job: false
 sources:
   goldsky_source:
     dataset_name: stellar_testnet.events
-    start_at: 1589244
+    start_at: 2036131
     type: dataset
     version: 1.2.0
 transforms:
   transform_1_events:
     primary_key: id
-    sql: >-
-      SELECT 
-          *,
-          CASE 
-              WHEN contract_id = 'CCA256DWBJJEEYXAWQHP5N4ZAJ2NW4P5T52LZCGC766Q5XHFVNQBMFZV' THEN 'main'
-              WHEN contract_id = 'CAMLHKQHNZO2IOIBFUF5BGZ2V62BMS5QCWFFGRCB4NOB3G5OMDA7SGZN' THEN 'unverified'
-              WHEN contract_id = 'CDTTACFIG4TJXNZV4XG6AFM35OMALOJ6ZP3OOZE3NBTNF46MBTDNVYAY' THEN 'circle'
-              WHEN contract_id = 'CC4HNYLXTQ24BQBMIG5A4VPKB7BPNKEIDFKDTI2OZXKRGYU4WXKAD4V7' THEN 'soroswap'
-              WHEN contract_id = 'CCFSY7TO5UA3B4YZTBYUC6OASCSGVARLJKPYCGP3GY5AJMAME6LWV2P7' THEN 'blend'
-              WHEN contract_id = 'CBFL7TYEYEWSJSBKDP3V5QAEAOJBXTGSQXO6DTIZMQQNCZ64VJG6CMSG' THEN 'defindex'
-              WHEN contract_id = 'CAXV5XGWGN344QRU43JG36BKOTFRS33MRBF3LG5PPJQIMKFAD5UYKR5B' THEN 'oz'
-            
-          END AS channel
-      FROM goldsky_source 
-
-      WHERE contract_id IN (
-          'CCA256DWBJJEEYXAWQHP5N4ZAJ2NW4P5T52LZCGC766Q5XHFVNQBMFZV', 
-          'CAMLHKQHNZO2IOIBFUF5BGZ2V62BMS5QCWFFGRCB4NOB3G5OMDA7SGZN',
-          'CDTTACFIG4TJXNZV4XG6AFM35OMALOJ6ZP3OOZE3NBTNF46MBTDNVYAY',
-          'CC4HNYLXTQ24BQBMIG5A4VPKB7BPNKEIDFKDTI2OZXKRGYU4WXKAD4V7',
-          'CCFSY7TO5UA3B4YZTBYUC6OASCSGVARLJKPYCGP3GY5AJMAME6LWV2P7',
-          'CBFL7TYEYEWSJSBKDP3V5QAEAOJBXTGSQXO6DTIZMQQNCZ64VJG6CMSG',
-          'CAXV5XGWGN344QRU43JG36BKOTFRS33MRBF3LG5PPJQIMKFAD5UYKR5B'
-      ) AND in_successful_contract_call = true  AND transaction_successful =
-      true
+    sql: |-
+      SELECT *
+      FROM goldsky_source
+      WHERE in_successful_contract_call = true
+        AND transaction_successful = true
+        AND JSON_VALUE(topics, '$[0].symbol') IN (
+              'deploy',
+              'publish',
+              'register',
+              'rename',
+              'update_address',
+              'update_owner',
+              'sub_reg'
+            )
     type: sql
   transform_2_events_with_command_name:
     primary_key: id
     sql: |-
-      select 
+      select
         id,
-        transaction_hash, 
-        ledger_sequence, 
-        ledger_closed_at as created_at, 
+        transaction_hash,
+        ledger_sequence,
+        ledger_closed_at as created_at,
         JSON_VALUE(topics, '$[0].symbol') as command,
-        channel,
-        data
+        contract_id as channel,
+        contract_id as emitter_contract_id,
+        data,
+        topics
       from transform_1_events
     type: sql
   transform_3_deploy_events:
@@ -242,7 +233,7 @@ transforms:
   transform_3_update_owner:
     primary_key: id
     sql: |-
-      SELECT 
+      SELECT
           id, transaction_hash, ledger_sequence, created_at, channel,
           CASE
               WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'contract_name' THEN JSON_VALUE(data, '$.map[0].val.string')
@@ -254,6 +245,30 @@ transforms:
           END AS new_owner
       FROM transform_2_events_with_command_name
       WHERE command = 'update_owner'
+    type: sql
+  transform_3_subregistry_events:
+    primary_key: contract_id
+    sql: |-
+      SELECT
+          id,
+          transaction_hash,
+          ledger_sequence,
+          created_at,
+          CASE
+              WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'contract_id'
+                  THEN JSON_VALUE(data, '$.map[0].val.address')
+              WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'contract_id'
+                  THEN JSON_VALUE(data, '$.map[1].val.address')
+          END AS contract_id,
+          CASE
+              WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'name'
+                  THEN JSON_VALUE(data, '$.map[0].val.string')
+              WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'name'
+                  THEN JSON_VALUE(data, '$.map[1].val.string')
+          END AS channel
+      FROM transform_2_events_with_command_name
+      WHERE command = 'sub_reg'
+        AND emitter_contract_id = 'CB7WYFH2AGIDCNYU2QZXYHORI6GYJBJYX33Z3WKKRVGVXAA2SYA76J2W'
     type: sql
 sinks:
   deploy_events_pg:
@@ -297,5 +312,11 @@ sinks:
     schema: public
     secret_name: HOSTED_POSTGRES_CMJD1KI8O0
     table: v4_update_owner
+    type: postgres
+  subregistry_events_pg:
+    from: transform_3_subregistry_events
+    schema: public
+    secret_name: HOSTED_POSTGRES_CMJD1KI8O0
+    table: registries
     type: postgres
 
