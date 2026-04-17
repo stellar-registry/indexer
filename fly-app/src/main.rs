@@ -308,9 +308,9 @@ async fn fetch_wasm_detail(
     }
 }
 
-async fn get_wasm_main_channel(pool: web::Data<PgPool>, path: web::Path<String>) -> HttpResponse {
+async fn get_wasm_root_channel(pool: web::Data<PgPool>, path: web::Path<String>) -> HttpResponse {
     let wasm_name = path.into_inner();
-    fetch_wasm_detail(pool.get_ref(), "main", &wasm_name, None).await
+    fetch_wasm_detail(pool.get_ref(), "root", &wasm_name, None).await
 }
 
 async fn get_wasm_latest(
@@ -321,12 +321,12 @@ async fn get_wasm_latest(
     fetch_wasm_detail(pool.get_ref(), &channel, &wasm_name, None).await
 }
 
-async fn get_wasm_version_main(
+async fn get_wasm_version_root(
     pool: web::Data<PgPool>,
     path: web::Path<(String, String)>,
 ) -> HttpResponse {
     let (wasm_name, version) = path.into_inner();
-    fetch_wasm_detail(pool.get_ref(), "main", &wasm_name, Some(&version)).await
+    fetch_wasm_detail(pool.get_ref(), "root", &wasm_name, Some(&version)).await
 }
 
 async fn get_wasm_version(
@@ -337,7 +337,7 @@ async fn get_wasm_version(
     fetch_wasm_detail(pool.get_ref(), &channel, &wasm_name, Some(&version)).await
 }
 
-async fn get_contracts_main(
+async fn get_contracts_root(
     pool: web::Data<PgPool>,
     query: web::Query<QueryParams>,
 ) -> HttpResponse {
@@ -403,13 +403,13 @@ async fn get_contracts_main(
     }
 }
 
-async fn get_single_contract_main(
+async fn get_single_contract_root(
     pool: web::Data<PgPool>,
     path: web::Path<String>,
 ) -> HttpResponse {
     let contract_name = path.into_inner();
 
-    fetch_single_contract("main", &contract_name, pool).await
+    fetch_single_contract("root", &contract_name, pool).await
 }
 
 async fn get_single_contract(
@@ -643,7 +643,7 @@ async fn main() -> std::io::Result<()> {
             .route("/v1/wasms", web::get().to(get_wasms))
             .route(
                 "/v1/wasms/{wasm_name}",
-                web::get().to(get_wasm_main_channel),
+                web::get().to(get_wasm_root_channel),
             )
             .route(
                 "/v1/wasms/{channel}/{wasm_name}",
@@ -651,17 +651,17 @@ async fn main() -> std::io::Result<()> {
             )
             .route(
                 "/v1/wasms/{wasm_name}/v/{version}",
-                web::get().to(get_wasm_version_main),
+                web::get().to(get_wasm_version_root),
             )
             .route(
                 "/v1/wasms/{channel}/{wasm_name}/v/{version}",
                 web::get().to(get_wasm_version),
             )
             .route("/v1/registries", web::get().to(get_registries))
-            .route("/v1/contracts", web::get().to(get_contracts_main))
+            .route("/v1/contracts", web::get().to(get_contracts_root))
             .route(
                 "/v1/contracts/{contract_name}",
-                web::get().to(get_single_contract_main),
+                web::get().to(get_single_contract_root),
             )
             .route(
                 "/v1/contracts/{channel}/{contract_name}",
