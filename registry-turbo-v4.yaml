@@ -269,7 +269,7 @@ transforms:
           END AS channel
       FROM transform_2_events_with_command_name
       WHERE command = 'sub_reg'
-        AND emitter_contract_id = 'CBT6FE6WLI3IBZPKQ4JJRHD5LIVUKNSGOT4B7CWMYTJMTCQOGUJH5JTI'
+        AND emitter_contract_id = 'CBNBQND6EMYTTRTCUWUJ3VIKF7RUUISK5T4GAKTXRVIQRHGP4XQY4ID7'
     type: sql
 sinks:
   deploy_events_pg:

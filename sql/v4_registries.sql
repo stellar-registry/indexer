@@ -2,7 +2,7 @@
 --
 -- Populated by registry-turbo-v4's subregistry_events_pg sink, which extracts
 -- `sub_reg` events emitted by the root registry
--- (CDVDJX2HXCDRWUA7ISE2X3W4S5A6DEWLSDHBK3I5WH3JLWKF2IT4HA2P on testnet).
+-- (CBNBQND6EMYTTRTCUWUJ3VIKF7RUUISK5T4GAKTXRVIQRHGP4XQY4ID7 on testnet).
 -- Each row maps a sub-registry contract_id to its human-readable channel name.
 -- Upserts on contract_id so re-announcing a sub-registry updates its channel.
 
