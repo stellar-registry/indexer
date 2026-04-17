@@ -188,13 +188,12 @@ async fn get_wasms(pool: web::Data<PgPool>, query: web::Query<QueryParams>) -> H
     // to go to the next transaction in the same ledger (if any)
     let rows = sqlx::query_as::<_, WasmResult>(
         "SELECT sub.id, sub.author, sub.wasm_version, sub.wasm_name, sub.wasm_hash, \
-                COALESCE(r.channel, sub.channel) AS channel \
+                sub.resolved_channel AS channel \
          FROM \
            (SELECT *, ROW_NUMBER() OVER \
              (PARTITION BY wasm_name ORDER BY ledger_sequence DESC, wasm_version DESC) AS rn \
-             FROM public.v4_published_wasms \
+             FROM public.v4_published_wasms_named \
            ) AS sub \
-         LEFT JOIN public.v4_registries r ON r.contract_id = sub.channel \
          WHERE rn = 1 AND (ledger_sequence, id) >= ($1, $2) \
          ORDER BY ledger_sequence, id ASC \
          LIMIT $3",
@@ -232,13 +231,12 @@ async fn fetch_wasm_detail(
 ) -> HttpResponse {
     let row = if let Some(ver) = version {
         sqlx::query_as::<_, WasmDetailRow>(
-            "SELECT w.id, w.transaction_hash, w.ledger_sequence, w.created_at, \
-                    w.author, w.wasm_version, w.wasm_name, w.wasm_hash, \
-                    COALESCE(r.channel, w.channel) AS channel \
-             FROM public.v4_published_wasms w \
-             LEFT JOIN public.v4_registries r ON r.contract_id = w.channel \
-             WHERE w.wasm_name = $1 AND w.wasm_version = $2 \
-               AND COALESCE(r.channel, w.channel) = $3",
+            "SELECT id, transaction_hash, ledger_sequence, created_at, \
+                    author, wasm_version, wasm_name, wasm_hash, \
+                    resolved_channel AS channel \
+             FROM public.v4_published_wasms_named \
+             WHERE wasm_name = $1 AND wasm_version = $2 \
+               AND resolved_channel = $3",
         )
         .bind(wasm_name)
         .bind(ver)
@@ -249,15 +247,14 @@ async fn fetch_wasm_detail(
         sqlx::query_as::<_, WasmDetailRow>(
             "SELECT sub.id, sub.transaction_hash, sub.ledger_sequence, sub.created_at, \
                     sub.author, sub.wasm_version, sub.wasm_name, sub.wasm_hash, \
-                    COALESCE(r.channel, sub.channel) AS channel \
+                    sub.resolved_channel AS channel \
              FROM \
                (SELECT *, ROW_NUMBER() OVER \
                  (PARTITION BY wasm_name ORDER BY ledger_sequence DESC, wasm_version DESC) AS rn \
-                 FROM public.v4_published_wasms \
+                 FROM public.v4_published_wasms_named \
                ) AS sub \
-             LEFT JOIN public.v4_registries r ON r.contract_id = sub.channel \
              WHERE sub.rn = 1 AND sub.wasm_name = $1 \
-               AND COALESCE(r.channel, sub.channel) = $2",
+               AND sub.resolved_channel = $2",
         )
         .bind(wasm_name)
         .bind(channel)
@@ -269,13 +266,12 @@ async fn fetch_wasm_detail(
         // TODO: can do only one select and filter the results
         Ok(Some(detail_row)) => {
             let versions = sqlx::query_as::<_, WasmVersionResult>(
-                "SELECT w.author, w.wasm_version, w.wasm_name, w.wasm_hash, \
-                        COALESCE(r.channel, w.channel) AS channel \
-                 FROM public.v4_published_wasms w \
-                 LEFT JOIN public.v4_registries r ON r.contract_id = w.channel \
-                 WHERE w.wasm_name = $1 \
-                   AND COALESCE(r.channel, w.channel) = $2 \
-                 ORDER BY w.ledger_sequence DESC, w.wasm_version DESC",
+                "SELECT author, wasm_version, wasm_name, wasm_hash, \
+                        resolved_channel AS channel \
+                 FROM public.v4_published_wasms_named \
+                 WHERE wasm_name = $1 \
+                   AND resolved_channel = $2 \
+                 ORDER BY ledger_sequence DESC, wasm_version DESC",
             )
             .bind(wasm_name)
             .bind(channel)
@@ -361,15 +357,13 @@ async fn get_contracts_main(
         "SELECT
                 registered.id,
                 registered.contract_id,
-                COALESCE(r.channel, registered.channel) AS channel,
+                registered.resolved_channel AS channel,
                 registered.contract_name,
                 registered.sac,
                 deployed.deployer,
                 wasms.wasm_version,
                 wasms.wasm_name
-            FROM public.v4_registered_contracts registered
-            LEFT JOIN public.v4_registries r
-              ON r.contract_id = registered.channel
+            FROM public.v4_registered_contracts_named registered
             LEFT JOIN (
                 SELECT DISTINCT ON (wasm_hash) wasm_hash, wasm_version, wasm_name
                 FROM public.v4_published_wasms
@@ -439,14 +433,12 @@ async fn fetch_single_contract(
                 registered.created_at,
                 registered.contract_id,
                 registered.contract_name,
-                COALESCE(r.channel, registered.channel) AS channel,
+                registered.resolved_channel AS channel,
                 registered.sac,
                 deployed.deployer,
                 wasms.wasm_version,
                 wasms.wasm_name
-            FROM public.v4_registered_contracts registered
-            LEFT JOIN public.v4_registries r
-              ON r.contract_id = registered.channel
+            FROM public.v4_registered_contracts_named registered
             LEFT JOIN (
                 SELECT DISTINCT ON (wasm_hash) wasm_hash, wasm_version, wasm_name
                 FROM public.v4_published_wasms
@@ -458,7 +450,7 @@ async fn fetch_single_contract(
                 ORDER BY contract_id, ledger_sequence DESC
             ) deployed ON deployed.contract_id = registered.contract_id
             WHERE registered.contract_name = $1
-              AND COALESCE(r.channel, registered.channel) = $2
+              AND registered.resolved_channel = $2
             ORDER BY registered.ledger_sequence DESC
             LIMIT 1",
     )
@@ -498,12 +490,10 @@ async fn fetch_single_contract_detail(
         "SELECT
                 registered.contract_id,
                 registered.contract_name,
-                COALESCE(r.channel, registered.channel) AS channel,
+                registered.resolved_channel AS channel,
                 deployed.deployer,
                 raw_event.operation_body
-            FROM public.v4_registered_contracts registered
-            LEFT JOIN public.v4_registries r
-              ON r.contract_id = registered.channel
+            FROM public.v4_registered_contracts_named registered
             LEFT JOIN (
                 SELECT DISTINCT ON (contract_id) contract_id, deployer, transaction_hash
                 FROM public.v4_deployed_contracts
@@ -512,7 +502,7 @@ async fn fetch_single_contract_detail(
             LEFT JOIN public.v4_raw_events_backup raw_event
               ON deployed.transaction_hash = raw_event.contract_id
             WHERE registered.contract_name = $1
-              AND COALESCE(r.channel, registered.channel) = $2
+              AND registered.resolved_channel = $2
             ORDER BY registered.ledger_sequence DESC
             LIMIT 1",
     )
