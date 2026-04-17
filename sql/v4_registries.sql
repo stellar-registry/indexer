@@ -6,7 +6,7 @@
 -- Each row maps a sub-registry contract_id to its human-readable channel name.
 -- Upserts on contract_id so re-announcing a sub-registry updates its channel.
 
-CREATE TABLE IF NOT EXISTS registries (
+CREATE TABLE IF NOT EXISTS v4_registries (
   contract_id      TEXT    NOT NULL PRIMARY KEY,
   channel          TEXT    NOT NULL,
   id               TEXT    NOT NULL,
@@ -15,4 +15,4 @@ CREATE TABLE IF NOT EXISTS registries (
   created_at       TIMESTAMP NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS registries_channel_idx ON registries (channel);
+CREATE INDEX IF NOT EXISTS v4_registries_channel_idx ON v4_registries (channel);

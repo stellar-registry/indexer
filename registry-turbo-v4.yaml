@@ -318,6 +318,6 @@ sinks:
     from: transform_3_subregistry_events
     schema: public
     secret_name: HOSTED_POSTGRES_CMJD1KI8O0
-    table: registries
+    table: v4_registries
     type: postgres
 

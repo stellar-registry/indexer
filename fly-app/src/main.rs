@@ -194,7 +194,7 @@ async fn get_wasms(pool: web::Data<PgPool>, query: web::Query<QueryParams>) -> H
              (PARTITION BY wasm_name ORDER BY ledger_sequence DESC, wasm_version DESC) AS rn \
              FROM public.v4_published_wasms \
            ) AS sub \
-         LEFT JOIN public.registries r ON r.contract_id = sub.channel \
+         LEFT JOIN public.v4_registries r ON r.contract_id = sub.channel \
          WHERE rn = 1 AND (ledger_sequence, id) >= ($1, $2) \
          ORDER BY ledger_sequence, id ASC \
          LIMIT $3",
@@ -236,7 +236,7 @@ async fn fetch_wasm_detail(
                     w.author, w.wasm_version, w.wasm_name, w.wasm_hash, \
                     COALESCE(r.channel, w.channel) AS channel \
              FROM public.v4_published_wasms w \
-             LEFT JOIN public.registries r ON r.contract_id = w.channel \
+             LEFT JOIN public.v4_registries r ON r.contract_id = w.channel \
              WHERE w.wasm_name = $1 AND w.wasm_version = $2 \
                AND COALESCE(r.channel, w.channel) = $3",
         )
@@ -255,7 +255,7 @@ async fn fetch_wasm_detail(
                  (PARTITION BY wasm_name ORDER BY ledger_sequence DESC, wasm_version DESC) AS rn \
                  FROM public.v4_published_wasms \
                ) AS sub \
-             LEFT JOIN public.registries r ON r.contract_id = sub.channel \
+             LEFT JOIN public.v4_registries r ON r.contract_id = sub.channel \
              WHERE sub.rn = 1 AND sub.wasm_name = $1 \
                AND COALESCE(r.channel, sub.channel) = $2",
         )
@@ -272,7 +272,7 @@ async fn fetch_wasm_detail(
                 "SELECT w.author, w.wasm_version, w.wasm_name, w.wasm_hash, \
                         COALESCE(r.channel, w.channel) AS channel \
                  FROM public.v4_published_wasms w \
-                 LEFT JOIN public.registries r ON r.contract_id = w.channel \
+                 LEFT JOIN public.v4_registries r ON r.contract_id = w.channel \
                  WHERE w.wasm_name = $1 \
                    AND COALESCE(r.channel, w.channel) = $2 \
                  ORDER BY w.ledger_sequence DESC, w.wasm_version DESC",
@@ -368,7 +368,7 @@ async fn get_contracts_main(
                 wasms.wasm_version,
                 wasms.wasm_name
             FROM public.v4_registered_contracts registered
-            LEFT JOIN public.registries r
+            LEFT JOIN public.v4_registries r
               ON r.contract_id = registered.channel
             LEFT JOIN (
                 SELECT DISTINCT ON (wasm_hash) wasm_hash, wasm_version, wasm_name
@@ -445,7 +445,7 @@ async fn fetch_single_contract(
                 wasms.wasm_version,
                 wasms.wasm_name
             FROM public.v4_registered_contracts registered
-            LEFT JOIN public.registries r
+            LEFT JOIN public.v4_registries r
               ON r.contract_id = registered.channel
             LEFT JOIN (
                 SELECT DISTINCT ON (wasm_hash) wasm_hash, wasm_version, wasm_name
@@ -502,7 +502,7 @@ async fn fetch_single_contract_detail(
                 deployed.deployer,
                 raw_event.operation_body
             FROM public.v4_registered_contracts registered
-            LEFT JOIN public.registries r
+            LEFT JOIN public.v4_registries r
               ON r.contract_id = registered.channel
             LEFT JOIN (
                 SELECT DISTINCT ON (contract_id) contract_id, deployer, transaction_hash
@@ -604,7 +604,7 @@ async fn index_v1() -> HttpResponse {
 async fn get_registries(pool: web::Data<PgPool>) -> HttpResponse {
     let rows = sqlx::query_as::<_, Registry>(
         "SELECT contract_id, channel, ledger_sequence, created_at \
-         FROM public.registries \
+         FROM public.v4_registries \
          ORDER BY channel ASC",
     )
     .fetch_all(pool.get_ref())
