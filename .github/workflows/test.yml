@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
+  node:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
@@ -69,3 +69,42 @@ jobs:
         run: npm run test:integration
         env:
           TEST_PG_URL: postgres://test:test@localhost:5433/registry_test
+
+  fly-app:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: fly-app
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: registry_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd="pg_isready -U test -d registry_test"
+          --health-interval=2s
+          --health-timeout=3s
+          --health-retries=15
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fly-app
+
+      - name: Cargo build (tests)
+        run: cargo build --tests
+
+      - name: Cargo test
+        run: cargo test --no-fail-fast
+        env:
+          TEST_DATABASE_URL: postgres://test:test@localhost:5433/registry_test
