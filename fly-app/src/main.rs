@@ -618,6 +618,43 @@ async fn health() -> HttpResponse {
     HttpResponse::Ok().finish()
 }
 
+pub fn configure_routes(cfg: &mut web::ServiceConfig) {
+    cfg.route("/", web::get().to(index))
+        .route("/v1", web::get().to(index_v1))
+        .route("/v1/wasms", web::get().to(get_wasms))
+        .route(
+            "/v1/wasms/{wasm_name}",
+            web::get().to(get_wasm_root_channel),
+        )
+        .route(
+            "/v1/wasms/{channel}/{wasm_name}",
+            web::get().to(get_wasm_latest),
+        )
+        .route(
+            "/v1/wasms/{wasm_name}/v/{version}",
+            web::get().to(get_wasm_version_root),
+        )
+        .route(
+            "/v1/wasms/{channel}/{wasm_name}/v/{version}",
+            web::get().to(get_wasm_version),
+        )
+        .route("/v1/registries", web::get().to(get_registries))
+        .route("/v1/contracts", web::get().to(get_contracts_root))
+        .route(
+            "/v1/contracts/{contract_name}",
+            web::get().to(get_single_contract_root),
+        )
+        .route(
+            "/v1/contracts/{channel}/{contract_name}",
+            web::get().to(get_single_contract),
+        )
+        .route(
+            "/v1/contract_deploy_details/{channel}/{contract_name}",
+            web::get().to(get_contract_deploy_detail),
+        )
+        .route("/health", web::get().to(health));
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
@@ -638,40 +675,7 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(pool.clone()))
-            .route("/", web::get().to(index))
-            .route("/v1", web::get().to(index_v1))
-            .route("/v1/wasms", web::get().to(get_wasms))
-            .route(
-                "/v1/wasms/{wasm_name}",
-                web::get().to(get_wasm_root_channel),
-            )
-            .route(
-                "/v1/wasms/{channel}/{wasm_name}",
-                web::get().to(get_wasm_latest),
-            )
-            .route(
-                "/v1/wasms/{wasm_name}/v/{version}",
-                web::get().to(get_wasm_version_root),
-            )
-            .route(
-                "/v1/wasms/{channel}/{wasm_name}/v/{version}",
-                web::get().to(get_wasm_version),
-            )
-            .route("/v1/registries", web::get().to(get_registries))
-            .route("/v1/contracts", web::get().to(get_contracts_root))
-            .route(
-                "/v1/contracts/{contract_name}",
-                web::get().to(get_single_contract_root),
-            )
-            .route(
-                "/v1/contracts/{channel}/{contract_name}",
-                web::get().to(get_single_contract),
-            )
-            .route(
-                "/v1/contract_deploy_details/{channel}/{contract_name}",
-                web::get().to(get_contract_deploy_detail),
-            )
-            .route("/health", web::get().to(health))
+            .configure(configure_routes)
     })
     .bind(("0.0.0.0", port))?
     .run()
