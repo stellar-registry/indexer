@@ -681,3 +681,825 @@ async fn main() -> std::io::Result<()> {
     .run()
     .await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Helpers shared by the DB-backed submodules (`endpoints` and
+    // `e2e_real_data`). `make_app!` is a macro (not a fn) because the
+    // concrete `impl Service` type returned by `test::init_service` is hard
+    // to name in a helper signature; expanding at the call site sidesteps it.
+    async fn body_json<B: actix_web::body::MessageBody>(
+        resp: actix_web::dev::ServiceResponse<B>,
+    ) -> serde_json::Value {
+        actix_web::test::read_body_json(resp).await
+    }
+
+    macro_rules! make_app {
+        ($pool:expr) => {
+            actix_web::test::init_service(
+                actix_web::App::new()
+                    .app_data(actix_web::web::Data::new($pool))
+                    .configure(configure_routes),
+            )
+            .await
+        };
+    }
+
+    mod parse_cursor_tests {
+        use super::*;
+
+        #[test]
+        fn none_returns_zero_and_empty() {
+            let (ledger, cursor) = parse_cursor(&None).unwrap();
+            assert_eq!(ledger, 0);
+            assert_eq!(cursor, "");
+        }
+
+        #[test]
+        fn valid_two_segment_appends_z() {
+            let (ledger, cursor) = parse_cursor(&Some("12345-abcdef".into())).unwrap();
+            assert_eq!(ledger, 12345);
+            assert_eq!(cursor, "12345-abcdef-z");
+        }
+
+        #[test]
+        fn valid_three_segment_appends_z() {
+            // splitn(3, '-') keeps everything past the second '-' in one piece.
+            let (ledger, cursor) =
+                parse_cursor(&Some("99-hash-op-0-event-1".into())).unwrap();
+            assert_eq!(ledger, 99);
+            assert_eq!(cursor, "99-hash-op-0-event-1-z");
+        }
+
+        #[test]
+        fn single_segment_is_rejected() {
+            assert!(parse_cursor(&Some("12345".into())).is_err());
+        }
+
+        #[test]
+        fn non_numeric_ledger_is_rejected() {
+            assert!(parse_cursor(&Some("abc-def".into())).is_err());
+        }
+
+        #[test]
+        fn negative_ledger_is_rejected() {
+            assert!(parse_cursor(&Some("-1-foo".into())).is_err());
+        }
+    }
+
+    mod serialize_raw_tests {
+        use super::*;
+        use serde::Serialize;
+
+        #[derive(Serialize)]
+        struct Wrap(#[serde(serialize_with = "serialize_raw")] Option<String>);
+
+        #[test]
+        fn none_serializes_to_null() {
+            assert_eq!(serde_json::to_string(&Wrap(None)).unwrap(), "null");
+        }
+
+        #[test]
+        fn valid_json_string_is_inlined() {
+            let w = Wrap(Some(r#"{"foo":42}"#.into()));
+            // Round-trip via serde_json::Value so we compare semantically,
+            // not by key-ordering of serialize output.
+            let actual: serde_json::Value = serde_json::from_str(
+                &serde_json::to_string(&w).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(actual, serde_json::json!({"foo": 42}));
+        }
+
+        #[test]
+        fn invalid_json_produces_error() {
+            let w = Wrap(Some("not valid json".into()));
+            assert!(serde_json::to_string(&w).is_err());
+        }
+    }
+
+    // Integration tests below hit a real Postgres. They're gated on
+    // TEST_DATABASE_URL; when unset, each test logs a skip message and
+    // returns. CI sets the env var to the service container URL.
+    mod endpoints {
+        use super::*;
+        use actix_web::{http::StatusCode, test};
+        use serial_test::serial;
+        use sqlx::postgres::PgPoolOptions;
+        use sqlx::Executor;
+
+        async fn setup_pool() -> Option<PgPool> {
+            let url = std::env::var("TEST_DATABASE_URL").ok()?;
+            let pool = PgPoolOptions::new()
+                .max_connections(2)
+                .connect(&url)
+                .await
+                .expect("connect to test db");
+            apply_schema(&pool).await;
+            truncate_all(&pool).await;
+            Some(pool)
+        }
+
+        async fn apply_schema(pool: &PgPool) {
+            let manifest = env!("CARGO_MANIFEST_DIR");
+            for rel in [
+                "../sql/v4_sink_tables.sql",
+                "../sql/v4_registries.sql",
+                "../sql/v4_named_views.sql",
+            ] {
+                let path = format!("{manifest}/{rel}");
+                let sql = tokio::fs::read_to_string(&path)
+                    .await
+                    .unwrap_or_else(|e| panic!("read {path}: {e}"));
+                sqlx::raw_sql(&sql)
+                    .execute(pool)
+                    .await
+                    .unwrap_or_else(|e| panic!("apply {path}: {e}"));
+            }
+        }
+
+        async fn truncate_all(pool: &PgPool) {
+            pool.execute(
+                "TRUNCATE v4_published_wasms, v4_registered_contracts, \
+                 v4_deployed_contracts, v4_registries, v4_rename, \
+                 v4_update_address, v4_update_owner, v4_raw_events_backup \
+                 RESTART IDENTITY",
+            )
+            .await
+            .expect("truncate");
+        }
+
+        fn ts(s: &str) -> chrono::NaiveDateTime {
+            chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S").unwrap()
+        }
+
+        async fn insert_wasm(
+            pool: &PgPool,
+            id: &str,
+            ledger: i64,
+            channel: &str,
+            name: &str,
+            version: &str,
+            hash: &str,
+        ) {
+            sqlx::query(
+                "INSERT INTO v4_published_wasms \
+                   (id, transaction_hash, ledger_sequence, created_at, \
+                    channel, author, wasm_version, wasm_name, wasm_hash) \
+                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+            )
+            .bind(id)
+            .bind(format!("tx-{id}"))
+            .bind(ledger)
+            .bind(ts("2026-04-17 12:00:00"))
+            .bind(channel)
+            .bind("GAUTHOR")
+            .bind(version)
+            .bind(name)
+            .bind(hash)
+            .execute(pool)
+            .await
+            .expect("insert wasm");
+        }
+
+        #[allow(clippy::too_many_arguments)]
+        async fn insert_registered(
+            pool: &PgPool,
+            id: &str,
+            ledger: i64,
+            channel: &str,
+            contract_name: &str,
+            contract_id: &str,
+            wasm_hash: &str,
+            sac: bool,
+        ) {
+            sqlx::query(
+                "INSERT INTO v4_registered_contracts \
+                   (id, transaction_hash, ledger_sequence, created_at, \
+                    channel, contract_name, contract_id, sac, wasm_hash) \
+                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+            )
+            .bind(id)
+            .bind(format!("tx-{id}"))
+            .bind(ledger)
+            .bind(ts("2026-04-17 12:00:00"))
+            .bind(channel)
+            .bind(contract_name)
+            .bind(contract_id)
+            .bind(sac)
+            .bind(wasm_hash)
+            .execute(pool)
+            .await
+            .expect("insert registered");
+        }
+
+        async fn insert_deployed(
+            pool: &PgPool,
+            id: &str,
+            ledger: i64,
+            channel: &str,
+            contract_id: &str,
+            deployer: &str,
+        ) {
+            sqlx::query(
+                "INSERT INTO v4_deployed_contracts \
+                   (id, transaction_hash, ledger_sequence, created_at, \
+                    channel, wasm_name, wasm_version, deployer, contract_id) \
+                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+            )
+            .bind(id)
+            .bind(format!("tx-{id}"))
+            .bind(ledger)
+            .bind(ts("2026-04-17 12:00:00"))
+            .bind(channel)
+            .bind("ignored")
+            .bind("ignored")
+            .bind(deployer)
+            .bind(contract_id)
+            .execute(pool)
+            .await
+            .expect("insert deployed");
+        }
+
+        async fn insert_registry(
+            pool: &PgPool,
+            contract_id: &str,
+            channel_name: &str,
+            ledger: i64,
+        ) {
+            sqlx::query(
+                "INSERT INTO v4_registries \
+                   (contract_id, channel, id, transaction_hash, ledger_sequence, created_at) \
+                 VALUES ($1,$2,$3,$4,$5,$6)",
+            )
+            .bind(contract_id)
+            .bind(channel_name)
+            .bind(format!("reg-{contract_id}"))
+            .bind(format!("tx-{contract_id}"))
+            .bind(ledger)
+            .bind(ts("2026-04-17 12:00:00"))
+            .execute(pool)
+            .await
+            .expect("insert registry");
+        }
+
+        macro_rules! skip_without_db {
+            () => {
+                match setup_pool().await {
+                    Some(pool) => pool,
+                    None => {
+                        eprintln!("skipping: TEST_DATABASE_URL not set");
+                        return;
+                    }
+                }
+            };
+        }
+
+        #[actix_web::test]
+        #[serial]
+        async fn health_returns_200() {
+            let pool = skip_without_db!();
+            let app = make_app!(pool);
+            let req = test::TestRequest::get().uri("/health").to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), StatusCode::OK);
+        }
+
+        #[actix_web::test]
+        #[serial]
+        async fn index_lists_v1() {
+            let pool = skip_without_db!();
+            let app = make_app!(pool);
+            let req = test::TestRequest::get().uri("/").to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), StatusCode::OK);
+            let body = body_json(resp).await;
+            assert_eq!(body["name"], "Registry Indexer API");
+            assert_eq!(body["versions"][0]["version"], "v1");
+        }
+
+        #[actix_web::test]
+        #[serial]
+        async fn wasms_list_empty() {
+            let pool = skip_without_db!();
+            let app = make_app!(pool);
+            let req = test::TestRequest::get().uri("/v1/wasms").to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), StatusCode::OK);
+            let body = body_json(resp).await;
+            assert_eq!(body["result"].as_array().unwrap().len(), 0);
+            assert!(body["next"].is_null());
+        }
+
+        #[actix_web::test]
+        #[serial]
+        async fn wasms_list_keeps_latest_per_name() {
+            let pool = skip_without_db!();
+            // Two versions of "foo", one older "bar". Expect 2 rows, foo@v2 + bar@v1.
+            insert_wasm(&pool, "a1", 100, "root", "foo", "1.0.0", "h-foo-1").await;
+            insert_wasm(&pool, "a2", 200, "root", "foo", "2.0.0", "h-foo-2").await;
+            insert_wasm(&pool, "b1", 150, "root", "bar", "1.0.0", "h-bar-1").await;
+
+            let app = make_app!(pool);
+            let req = test::TestRequest::get().uri("/v1/wasms").to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), StatusCode::OK);
+            let body = body_json(resp).await;
+            let rows = body["result"].as_array().unwrap();
+            assert_eq!(rows.len(), 2);
+            // Ordered by ledger_sequence ASC in the outer query — bar@150 before foo@200.
+            assert_eq!(rows[0]["wasm_name"], "bar");
+            assert_eq!(rows[0]["wasm_version"], "1.0.0");
+            assert_eq!(rows[1]["wasm_name"], "foo");
+            assert_eq!(rows[1]["wasm_version"], "2.0.0");
+        }
+
+        #[actix_web::test]
+        #[serial]
+        async fn wasm_by_name_resolves_friendly_channel() {
+            let pool = skip_without_db!();
+            // A sub-registry emits from contract_id CSUB…, announced under channel "soroswap".
+            insert_registry(&pool, "CSUBREG", "soroswap", 10).await;
+            insert_wasm(
+                &pool,
+                "w1",
+                300,
+                "CSUBREG",
+                "pool",
+                "1.0.0",
+                "h-pool-1",
+            )
+            .await;
+
+            let app = make_app!(pool);
+            let req = test::TestRequest::get()
+                .uri("/v1/wasms/soroswap/pool")
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), StatusCode::OK);
+            let body = body_json(resp).await;
+            assert_eq!(body["wasm_name"], "pool");
+            assert_eq!(body["channel"], "soroswap");
+            let versions = body["versions"].as_array().unwrap();
+            assert_eq!(versions.len(), 1);
+        }
+
+        #[actix_web::test]
+        #[serial]
+        async fn wasm_by_version_exact_match() {
+            let pool = skip_without_db!();
+            insert_wasm(&pool, "v1", 100, "root", "foo", "1.0.0", "h1").await;
+            insert_wasm(&pool, "v2", 200, "root", "foo", "2.0.0", "h2").await;
+
+            let app = make_app!(pool);
+            let req = test::TestRequest::get()
+                .uri("/v1/wasms/foo/v/1.0.0")
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), StatusCode::OK);
+            let body = body_json(resp).await;
+            assert_eq!(body["wasm_version"], "1.0.0");
+            assert_eq!(body["wasm_hash"], "h1");
+        }
+
+        #[actix_web::test]
+        #[serial]
+        async fn wasm_not_found_returns_404() {
+            let pool = skip_without_db!();
+            let app = make_app!(pool);
+            let req = test::TestRequest::get()
+                .uri("/v1/wasms/missing")
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        }
+
+        #[actix_web::test]
+        #[serial]
+        async fn wasms_rejects_out_of_range_limit() {
+            let pool = skip_without_db!();
+            let app = make_app!(pool);
+
+            for q in ["/v1/wasms?limit=0", "/v1/wasms?limit=201"] {
+                let req = test::TestRequest::get().uri(q).to_request();
+                let resp = test::call_service(&app, req).await;
+                assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "query {q}");
+            }
+        }
+
+        #[actix_web::test]
+        #[serial]
+        async fn wasms_rejects_malformed_cursor() {
+            let pool = skip_without_db!();
+            let app = make_app!(pool);
+            let req = test::TestRequest::get()
+                .uri("/v1/wasms?cursor=not-a-number-hash")
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        }
+
+        #[actix_web::test]
+        #[serial]
+        async fn contracts_list_joins_deployer_and_wasm() {
+            let pool = skip_without_db!();
+            insert_wasm(&pool, "w1", 50, "root", "token", "1.0.0", "h-token").await;
+            insert_registered(
+                &pool,
+                "r1",
+                100,
+                "root",
+                "usdc",
+                "CCONTRACTUSDC",
+                "h-token",
+                false,
+            )
+            .await;
+            insert_deployed(&pool, "d1", 80, "root", "CCONTRACTUSDC", "GDEPLOYER").await;
+
+            let app = make_app!(pool);
+            let req = test::TestRequest::get().uri("/v1/contracts").to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), StatusCode::OK);
+            let body = body_json(resp).await;
+            let rows = body["result"].as_array().unwrap();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0]["contract_name"], "usdc");
+            assert_eq!(rows[0]["contract_id"], "CCONTRACTUSDC");
+            assert_eq!(rows[0]["deployer"], "GDEPLOYER");
+            assert_eq!(rows[0]["wasm_name"], "token");
+            assert_eq!(rows[0]["is_stellar_asset_contract"], false);
+        }
+
+        #[actix_web::test]
+        #[serial]
+        async fn contract_by_name_not_found_returns_404() {
+            let pool = skip_without_db!();
+            let app = make_app!(pool);
+            let req = test::TestRequest::get()
+                .uri("/v1/contracts/nope")
+                .to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        }
+
+        #[actix_web::test]
+        #[serial]
+        async fn registries_returns_seeded_rows() {
+            let pool = skip_without_db!();
+            insert_registry(&pool, "CSUB1", "soroswap", 10).await;
+            insert_registry(&pool, "CSUB2", "blend", 11).await;
+
+            let app = make_app!(pool);
+            let req = test::TestRequest::get().uri("/v1/registries").to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), StatusCode::OK);
+            let body = body_json(resp).await;
+            let rows = body["result"].as_array().unwrap();
+            assert_eq!(rows.len(), 2);
+            // Ordered by channel ASC — blend before soroswap.
+            assert_eq!(rows[0]["channel"], "blend");
+            assert_eq!(rows[1]["channel"], "soroswap");
+        }
+    }
+
+    // End-to-end: real Soroban testnet events → pipeline transforms → sink
+    // tables → fly-app HTTP endpoints. Gated on both TEST_DATABASE_URL and
+    // the presence of `test/fixtures/soroban-events-real/` (refresh via
+    // `npm run fixtures:refresh` from the repo root). When either is
+    // missing, every test in the module returns early with a skip message.
+    //
+    // Caveat: Goldsky's Turbo runtime is Flink/Calcite, not Postgres. Postgres
+    // accepts the same JSON_VALUE / CAST syntax for our current transforms,
+    // but dialect drift could pass this test and still break in prod — see
+    // test/integration/pipeline-transforms.test.ts for the same caveat.
+    mod e2e_real_data {
+        use super::{body_json, configure_routes, PgPool};
+        use actix_web::{http::StatusCode, test};
+        use serde::Deserialize;
+        use serial_test::serial;
+        use sqlx::postgres::PgPoolOptions;
+        use sqlx::Executor;
+        use std::collections::HashMap;
+        use std::path::PathBuf;
+
+        fn repo_root() -> PathBuf {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .unwrap()
+                .to_path_buf()
+        }
+
+        fn real_fixtures_dir() -> PathBuf {
+            repo_root().join("test/fixtures/soroban-events-real")
+        }
+
+        fn has_real_fixtures() -> bool {
+            let dir = real_fixtures_dir();
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                return false;
+            };
+            entries
+                .filter_map(|e| e.ok())
+                .any(|e| e.path().extension().and_then(|x| x.to_str()) == Some("json"))
+        }
+
+        #[derive(Deserialize)]
+        struct Fixture {
+            id: String,
+            transaction_hash: String,
+            ledger_sequence: i64,
+            created_at: String,
+            command: String,
+            channel: String,
+            emitter_contract_id: String,
+            data: String,
+            topics: String,
+        }
+
+        #[derive(Deserialize)]
+        struct PipelineDoc {
+            transforms: HashMap<String, PipelineTransform>,
+        }
+
+        #[derive(Deserialize)]
+        struct PipelineTransform {
+            sql: String,
+        }
+
+        fn load_transforms() -> HashMap<String, String> {
+            let text = std::fs::read_to_string(repo_root().join("registry-turbo-v4.yaml"))
+                .expect("read pipeline yaml");
+            let doc: PipelineDoc =
+                serde_yaml_ng::from_str(&text).expect("parse pipeline yaml");
+            doc.transforms.into_iter().map(|(k, v)| (k, v.sql)).collect()
+        }
+
+        fn load_fixtures() -> Vec<Fixture> {
+            let mut out = vec![];
+            let mut entries: Vec<_> = std::fs::read_dir(real_fixtures_dir())
+                .expect("read fixtures dir")
+                .filter_map(|e| e.ok())
+                .collect();
+            entries.sort_by_key(|e| e.path());
+            for entry in entries {
+                let path = entry.path();
+                if path.extension().and_then(|x| x.to_str()) != Some("json") {
+                    continue;
+                }
+                let json = std::fs::read_to_string(&path).expect("read fixture");
+                let rows: Vec<Fixture> =
+                    serde_json::from_str(&json).expect("parse fixture");
+                out.extend(rows);
+            }
+            out
+        }
+
+        /// Maps each sink table to (transform_3 name, column list). Must match
+        /// the `sinks:` section in registry-turbo-v4.yaml. If a new sink is
+        /// added there, extend this list so its rows flow through.
+        const SINK_MAPPINGS: &[(&str, &str, &str)] = &[
+            (
+                "transform_3_deploy_events",
+                "v4_deployed_contracts",
+                "id, transaction_hash, ledger_sequence, created_at, channel, \
+                 wasm_name, wasm_version, deployer, contract_id",
+            ),
+            (
+                "transform_3_publish_events",
+                "v4_published_wasms",
+                "id, transaction_hash, ledger_sequence, created_at, channel, \
+                 author, wasm_version, wasm_hash, wasm_name",
+            ),
+            (
+                "transform_3_register_events",
+                "v4_registered_contracts",
+                "id, transaction_hash, ledger_sequence, created_at, channel, \
+                 contract_name, contract_id, sac, wasm_hash",
+            ),
+            (
+                "transform_3_rename",
+                "v4_rename",
+                "id, transaction_hash, ledger_sequence, created_at, channel, \
+                 old_name, new_name",
+            ),
+            (
+                "transform_3_update_address",
+                "v4_update_address",
+                "id, transaction_hash, ledger_sequence, created_at, channel, \
+                 contract_name, new_address",
+            ),
+            (
+                "transform_3_update_owner",
+                "v4_update_owner",
+                "id, transaction_hash, ledger_sequence, created_at, channel, \
+                 contract_name, new_owner",
+            ),
+            (
+                "transform_3_subregistry_events",
+                "v4_registries",
+                "id, transaction_hash, ledger_sequence, created_at, \
+                 contract_id, channel",
+            ),
+        ];
+
+        async fn setup_pool_with_real_data() -> Option<PgPool> {
+            if !has_real_fixtures() {
+                eprintln!("skipping e2e: test/fixtures/soroban-events-real/ empty");
+                return None;
+            }
+            let url = std::env::var("TEST_DATABASE_URL").ok()?;
+            let pool = PgPoolOptions::new()
+                .max_connections(2)
+                .connect(&url)
+                .await
+                .expect("connect to test db");
+
+            let manifest = env!("CARGO_MANIFEST_DIR");
+            for rel in [
+                "../sql/v4_sink_tables.sql",
+                "../sql/v4_registries.sql",
+                "../sql/v4_named_views.sql",
+            ] {
+                let sql = tokio::fs::read_to_string(format!("{manifest}/{rel}"))
+                    .await
+                    .expect("read sql");
+                sqlx::raw_sql(&sql).execute(&pool).await.expect("apply sql");
+            }
+
+            pool.execute(
+                "TRUNCATE v4_published_wasms, v4_registered_contracts, \
+                 v4_deployed_contracts, v4_registries, v4_rename, \
+                 v4_update_address, v4_update_owner, v4_raw_events_backup \
+                 RESTART IDENTITY",
+            )
+            .await
+            .expect("truncate");
+
+            // Staging table that mirrors the pipeline's transform_2 output.
+            // Drop + recreate so reruns against an existing DB start clean.
+            pool.execute("DROP TABLE IF EXISTS transform_2_events_with_command_name")
+                .await
+                .expect("drop staging");
+            pool.execute(
+                "CREATE TABLE transform_2_events_with_command_name (
+                   id TEXT PRIMARY KEY,
+                   transaction_hash TEXT,
+                   ledger_sequence BIGINT,
+                   created_at TIMESTAMP,
+                   command TEXT,
+                   channel TEXT,
+                   emitter_contract_id TEXT,
+                   data JSONB,
+                   topics JSONB
+                 )",
+            )
+            .await
+            .expect("create staging");
+
+            for row in load_fixtures() {
+                let ts = chrono::DateTime::parse_from_rfc3339(&row.created_at)
+                    .expect("parse created_at")
+                    .naive_utc();
+                sqlx::query(
+                    "INSERT INTO transform_2_events_with_command_name \
+                       (id, transaction_hash, ledger_sequence, created_at, command, \
+                        channel, emitter_contract_id, data, topics) \
+                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb)",
+                )
+                .bind(&row.id)
+                .bind(&row.transaction_hash)
+                .bind(row.ledger_sequence)
+                .bind(ts)
+                .bind(&row.command)
+                .bind(&row.channel)
+                .bind(&row.emitter_contract_id)
+                .bind(&row.data)
+                .bind(&row.topics)
+                .execute(&pool)
+                .await
+                .expect("seed transform_2");
+            }
+
+            let transforms = load_transforms();
+            for (transform, table, cols) in SINK_MAPPINGS {
+                let sql = transforms
+                    .get(*transform)
+                    .unwrap_or_else(|| panic!("missing transform {transform}"));
+                let stmt = format!(
+                    "INSERT INTO {table} ({cols}) SELECT {cols} FROM ({sql}) AS src"
+                );
+                sqlx::raw_sql(&stmt)
+                    .execute(&pool)
+                    .await
+                    .unwrap_or_else(|e| panic!("replay {transform} → {table}: {e}"));
+            }
+
+            Some(pool)
+        }
+
+        macro_rules! skip_without_e2e {
+            () => {
+                match setup_pool_with_real_data().await {
+                    Some(pool) => pool,
+                    None => {
+                        eprintln!("skipping e2e: TEST_DATABASE_URL or fixtures missing");
+                        return;
+                    }
+                }
+            };
+        }
+
+        fn count_command(command: &str) -> usize {
+            load_fixtures()
+                .iter()
+                .filter(|r| r.command == command)
+                .count()
+        }
+
+        #[actix_web::test]
+        #[serial]
+        async fn real_sub_regs_reach_registries_endpoint() {
+            let pool = skip_without_e2e!();
+            let app = make_app!(pool);
+            let req = test::TestRequest::get().uri("/v1/registries").to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), StatusCode::OK);
+            let body = body_json(resp).await;
+            let rows = body["result"].as_array().unwrap();
+            // Every fixture sub_reg is emitted by the current root, so every
+            // one should pass the pipeline filter. Flipping the root contract
+            // id in registry-turbo-v4.yaml would make rows.len() drop to 0.
+            let expected = count_command("sub_reg");
+            assert!(expected > 0, "no sub_reg events in fixtures");
+            assert_eq!(rows.len(), expected, "sub_regs should pass root filter");
+            let channels: std::collections::HashSet<_> = rows
+                .iter()
+                .map(|r| r["channel"].as_str().unwrap().to_string())
+                .collect();
+            // "root" and "unverified" are the two sub-registry announcements
+            // the real root always emits; used here to verify the `name`
+            // JSON-path extraction landed the friendly channel string.
+            assert!(channels.contains("root"), "channels: {channels:?}");
+            assert!(channels.contains("unverified"), "channels: {channels:?}");
+        }
+
+        #[actix_web::test]
+        #[serial]
+        async fn real_registers_reach_contracts_endpoint() {
+            let pool = skip_without_e2e!();
+            let app = make_app!(pool);
+            let req = test::TestRequest::get().uri("/v1/contracts").to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), StatusCode::OK);
+            let body = body_json(resp).await;
+            let rows = body["result"].as_array().unwrap();
+            let expected = count_command("register");
+            assert!(expected > 0, "no register events in fixtures");
+            assert_eq!(rows.len(), expected);
+            for row in rows {
+                assert!(
+                    !row["contract_name"].as_str().unwrap().is_empty(),
+                    "contract_name empty: {row}"
+                );
+                assert!(
+                    row["contract_id"].as_str().unwrap().starts_with('C'),
+                    "contract_id malformed: {row}"
+                );
+                assert!(
+                    row["is_stellar_asset_contract"].is_boolean(),
+                    "sac missing: {row}"
+                );
+            }
+        }
+
+        #[actix_web::test]
+        #[serial]
+        async fn real_publish_reaches_wasms_endpoint() {
+            let pool = skip_without_e2e!();
+            let app = make_app!(pool);
+            let req = test::TestRequest::get().uri("/v1/wasms").to_request();
+            let resp = test::call_service(&app, req).await;
+            assert_eq!(resp.status(), StatusCode::OK);
+            let body = body_json(resp).await;
+            let rows = body["result"].as_array().unwrap();
+            let expected = count_command("publish");
+            assert!(expected > 0, "no publish events in fixtures");
+            // /v1/wasms groups by wasm_name (latest per name), so a larger
+            // publish set may collapse to fewer rows — assert the returned
+            // row count is at most the input count but at least 1.
+            assert!(!rows.is_empty());
+            assert!(rows.len() <= expected);
+            for row in rows {
+                assert!(row["wasm_hash"].as_str().unwrap().len() >= 32);
+                assert!(row["wasm_name"].is_string());
+                // The publish events are emitted from the root's contract_id,
+                // which v4_published_wasms_named resolves back to "root" via
+                // v4_registries. Sanity check the channel lookup wiring.
+                assert_eq!(row["channel"], "root");
+            }
+        }
+    }
+}
