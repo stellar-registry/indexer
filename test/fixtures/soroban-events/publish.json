@@ -1,0 +1,24 @@
+[
+  {
+    "id": "0000002038110-0000000001-0001-0001",
+    "transaction_hash": "publish0001hash",
+    "ledger_sequence": 2038110,
+    "created_at": "2026-04-01T00:01:00Z",
+    "command": "publish",
+    "channel": "CCHANNELPUBLISH0000000000000000000000000000000000000",
+    "emitter_contract_id": "CCHANNELPUBLISH0000000000000000000000000000000000000",
+    "data": "{\"map\":[{\"key\":{\"symbol\":\"author\"},\"val\":{\"address\":\"GAUTHOR00000000000000000000000000000000000000000000000\"}},{\"key\":{\"symbol\":\"version\"},\"val\":{\"string\":\"0.1.0\"}},{\"key\":{\"symbol\":\"wasm_hash\"},\"val\":{\"bytes\":\"deadbeef\"}},{\"key\":{\"symbol\":\"wasm_name\"},\"val\":{\"string\":\"published_wasm\"}}]}",
+    "topics": "[{\"symbol\":\"publish\"}]"
+  },
+  {
+    "id": "0000002038111-0000000001-0001-0001",
+    "transaction_hash": "publish0002hash",
+    "ledger_sequence": 2038111,
+    "created_at": "2026-04-01T00:01:01Z",
+    "command": "publish",
+    "channel": "CCHANNELPUBLISH0000000000000000000000000000000000000",
+    "emitter_contract_id": "CCHANNELPUBLISH0000000000000000000000000000000000000",
+    "data": "{\"map\":[{\"key\":{\"symbol\":\"wasm_name\"},\"val\":{\"string\":\"published_wasm_v2\"}},{\"key\":{\"symbol\":\"author\"},\"val\":{\"address\":\"GAUTHOR00000000000000000000000000000000000000000000000\"}},{\"key\":{\"symbol\":\"version\"},\"val\":{\"string\":\"0.2.0\"}},{\"key\":{\"symbol\":\"wasm_hash\"},\"val\":{\"bytes\":\"cafebabe\"}}]}",
+    "topics": "[{\"symbol\":\"publish\"}]"
+  }
+]

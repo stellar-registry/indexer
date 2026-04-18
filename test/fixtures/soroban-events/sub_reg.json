@@ -1,0 +1,24 @@
+[
+  {
+    "id": "0000002038160-0000000001-0001-0001",
+    "transaction_hash": "subreg0001hash",
+    "ledger_sequence": 2038160,
+    "created_at": "2026-04-01T00:06:00Z",
+    "command": "sub_reg",
+    "channel": "CBNBQND6EMYTTRTCUWUJ3VIKF7RUUISK5T4GAKTXRVIQRHGP4XQY4ID7",
+    "emitter_contract_id": "CBNBQND6EMYTTRTCUWUJ3VIKF7RUUISK5T4GAKTXRVIQRHGP4XQY4ID7",
+    "data": "{\"map\":[{\"key\":{\"symbol\":\"contract_id\"},\"val\":{\"address\":\"CSUBREG1000000000000000000000000000000000000000000000\"}},{\"key\":{\"symbol\":\"name\"},\"val\":{\"string\":\"soroswap\"}}]}",
+    "topics": "[{\"symbol\":\"sub_reg\"}]"
+  },
+  {
+    "id": "0000002038161-0000000001-0001-0001",
+    "transaction_hash": "subreg0002hash",
+    "ledger_sequence": 2038161,
+    "created_at": "2026-04-01T00:06:01Z",
+    "command": "sub_reg",
+    "channel": "CBNBQND6EMYTTRTCUWUJ3VIKF7RUUISK5T4GAKTXRVIQRHGP4XQY4ID7",
+    "emitter_contract_id": "CBNBQND6EMYTTRTCUWUJ3VIKF7RUUISK5T4GAKTXRVIQRHGP4XQY4ID7",
+    "data": "{\"map\":[{\"key\":{\"symbol\":\"name\"},\"val\":{\"string\":\"aquarius\"}},{\"key\":{\"symbol\":\"contract_id\"},\"val\":{\"address\":\"CSUBREG2000000000000000000000000000000000000000000000\"}}]}",
+    "topics": "[{\"symbol\":\"sub_reg\"}]"
+  }
+]

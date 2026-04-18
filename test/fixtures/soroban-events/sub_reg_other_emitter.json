@@ -1,0 +1,13 @@
+[
+  {
+    "id": "0000002038170-0000000001-0001-0001",
+    "transaction_hash": "subregFAKEhash",
+    "ledger_sequence": 2038170,
+    "created_at": "2026-04-01T00:07:00Z",
+    "command": "sub_reg",
+    "channel": "CIMPOSTER0000000000000000000000000000000000000000000",
+    "emitter_contract_id": "CIMPOSTER0000000000000000000000000000000000000000000",
+    "data": "{\"map\":[{\"key\":{\"symbol\":\"contract_id\"},\"val\":{\"address\":\"CFAKESUB0000000000000000000000000000000000000000000\"}},{\"key\":{\"symbol\":\"name\"},\"val\":{\"string\":\"not_allowed\"}}]}",
+    "topics": "[{\"symbol\":\"sub_reg\"}]"
+  }
+]
