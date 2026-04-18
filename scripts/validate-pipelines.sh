@@ -9,7 +9,8 @@ TURBO_BIN="${TURBO_BIN:-$HOME/.goldsky/bin/turbo}"
 
 if [[ ! -x "$TURBO_BIN" ]]; then
   echo "turbo binary not found at $TURBO_BIN" >&2
-  echo "install from https://goldsky.com/install or set TURBO_BIN" >&2
+  echo "install with: curl -fsSL https://install-turbo.goldsky.com | bash" >&2
+  echo "or point TURBO_BIN at an existing binary" >&2
   exit 1
 fi
 
