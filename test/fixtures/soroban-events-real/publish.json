@@ -1,0 +1,13 @@
+[
+  {
+    "id": "0008975841698570240-0000000000",
+    "transaction_hash": "d4bdb46d83769d7940f305b3e073475410dd6ae2740aaedfbde40bd8a98c0432",
+    "ledger_sequence": 2089851,
+    "created_at": "2026-04-17T19:28:28Z",
+    "command": "publish",
+    "channel": "CBNBQND6EMYTTRTCUWUJ3VIKF7RUUISK5T4GAKTXRVIQRHGP4XQY4ID7",
+    "emitter_contract_id": "CBNBQND6EMYTTRTCUWUJ3VIKF7RUUISK5T4GAKTXRVIQRHGP4XQY4ID7",
+    "data": "{\"map\":[{\"key\":{\"symbol\":\"author\"},\"val\":{\"address\":\"GAMPJROHOAW662FINQ4XQOY2ULX5IEGYXCI4SMZYE75EHQBR6PSTJG3M\"}},{\"key\":{\"symbol\":\"version\"},\"val\":{\"string\":\"0.5.1\"}},{\"key\":{\"symbol\":\"wasm_hash\"},\"val\":{\"bytes\":\"b038a31da054b4a174b4d5b81b52691f67c21f6004cf233c37175e63a87304df\"}},{\"key\":{\"symbol\":\"wasm_name\"},\"val\":{\"string\":\"registry\"}}]}",
+    "topics": "[{\"symbol\":\"publish\"}]"
+  }
+]
