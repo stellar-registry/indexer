@@ -44,7 +44,7 @@ jobs:
 
       - name: Install Goldsky turbo CLI
         run: |
-          curl -fsSL https://goldsky.com/install | sh
+          curl -fsSL https://install-turbo.goldsky.com | bash
           echo "$HOME/.goldsky/bin" >> "$GITHUB_PATH"
 
       - name: Validate Goldsky pipelines
