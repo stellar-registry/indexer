@@ -7,13 +7,13 @@ const client = new SecretsManagerClient();
 
 let pool: Pool;
 
-export const handler: Handler = async (event: any) => {
-  const pool = await getPool();
+export type ValidatedParams = { limit: number; ledger: number; cursor: string };
+export type ValidationError = { statusCode: 400; body: string };
 
+export function validateParams(event: any): ValidatedParams | ValidationError {
   let limit = 200;
   let cursor = '';
   let ledger = 0;
-  let next = null;
 
   if (event.queryStringParameters) {
     if (event.queryStringParameters.limit) {
@@ -26,9 +26,9 @@ export const handler: Handler = async (event: any) => {
       }
     }
     if (event.queryStringParameters.cursor) {
-      cursor = event.queryStringParameters.cursor;
-      const split = cursor.split('-')
-      if (split.length == 0) {
+      const input: string = event.queryStringParameters.cursor;
+      const split = input.split('-')
+      if (split.length < 2) {
         return {
           statusCode: 400,
           body: JSON.stringify({ error: "Invalid cursor" })
@@ -46,6 +46,17 @@ export const handler: Handler = async (event: any) => {
       cursor = `${split[0]}-${split[1]}-z`
     }
   }
+
+  return { limit, ledger, cursor };
+}
+
+export const handler: Handler = async (event: any) => {
+  const validated = validateParams(event);
+  if ('statusCode' in validated) return validated;
+  const { limit, ledger, cursor } = validated;
+  let next = null;
+
+  const pool = await getPool();
 
   const query = {
     // Groups by wasm_name (priority to the latest publish by ledger_sequence)

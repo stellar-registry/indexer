@@ -119,7 +119,7 @@ async function getLastLedgerSeq(tableName: string): Promise<number> {
   return last_ledger;
 }
 
-function parseDeploy(event: DbEvent): DeployData {
+export function parseDeploy(event: DbEvent): DeployData {
   const data = JSON.parse(event.data)
   const elements = data.map
 
@@ -196,7 +196,7 @@ async function insertDeploys(newDeploys: Array<DeployData>, pool: Pool): Promise
   console.log(`inserted ${res.rowCount} rows in ${TablesName.deploys}`);
 }
 
-function parsePublish(event: DbEvent): PublishData {
+export function parsePublish(event: DbEvent): PublishData {
   const data = JSON.parse(event.data)
   const elements = data.map
 
