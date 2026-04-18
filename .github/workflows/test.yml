@@ -47,7 +47,19 @@ jobs:
           curl -fsSL https://install-turbo.goldsky.com | bash
           echo "$HOME/.goldsky/bin" >> "$GITHUB_PATH"
 
+      - name: Authenticate Goldsky CLI
+        if: env.GOLDSKY_API_KEY != ''
+        env:
+          GOLDSKY_API_KEY: ${{ secrets.GOLDSKY_API_KEY }}
+        run: |
+          mkdir -p "$HOME/.goldsky"
+          printf '%s' "$GOLDSKY_API_KEY" > "$HOME/.goldsky/auth_token"
+          chmod 600 "$HOME/.goldsky/auth_token"
+
       - name: Validate Goldsky pipelines
+        if: env.GOLDSKY_API_KEY != ''
+        env:
+          GOLDSKY_API_KEY: ${{ secrets.GOLDSKY_API_KEY }}
         run: npm run validate:pipelines
 
       - name: Unit tests
