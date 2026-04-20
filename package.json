@@ -12,6 +12,7 @@
     "test:integration": "jest --selectProjects integration --runInBand",
     "validate:pipelines": "bash scripts/validate-pipelines.sh",
     "fixtures:refresh": "ts-node scripts/fetch-event-fixtures.ts",
+    "fixtures:pull": "ts-node scripts/fetch-event-fixtures.ts pull",
     "cdk": "cdk"
   },
   "devDependencies": {

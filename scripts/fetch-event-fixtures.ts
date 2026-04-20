@@ -3,8 +3,11 @@
  * them to test/fixtures/soroban-events-real/<symbol>.json in the shape expected
  * by the pipeline's transform_2 output.
  *
- * Invoked via `npm run fixtures:refresh`. Not part of CI — requires network.
- * Re-run when the event schema changes or a new event symbol is introduced.
+ * Usage:
+ *   npm run fixtures:refresh          — wipe & replace all real fixtures
+ *   npm run fixtures:pull             — fetch only events newer than what we have
+ *
+ * Not part of CI — requires network.
  *
  * The script only fetches events actually emitted by the current root. Soroban
  * testnet RPC only retains ~10-20k ledgers of event history, so we scan a
@@ -72,26 +75,24 @@ async function fetchFor(contractId: string, startLedger: number) {
   return resp.events;
 }
 
-async function main(): Promise<void> {
-  const server = new SorobanRpc.Server(RPC_URL);
-  const latest = await server.getLatestLedger();
-  const startLedger = Math.max(latest.sequence - LOOKBACK_LEDGERS, 1);
+interface FixtureRow {
+  id: string;
+  transaction_hash: string;
+  ledger_sequence: number;
+  created_at: string;
+  command: string;
+  channel: string;
+  emitter_contract_id: string;
+  data: string;
+  topics: string;
+}
 
-  console.log(
-    `fetching events for ${CURRENT_ROOT} from ledger ${startLedger} → ${latest.sequence}`,
-  );
+const toScVal = (raw: unknown): xdr.ScVal =>
+  raw instanceof xdr.ScVal ? raw : xdr.ScVal.fromXDR(raw as string, 'base64');
 
-  const events = await fetchFor(CURRENT_ROOT, startLedger);
-  console.log(`decoded ${events.length} raw events`);
-  if (events.length === 0) {
-    console.log('no events for the current root in the retention window');
-    console.log('fixtures will be empty; real-data test suite will skip');
-  }
-
-  const bySymbol: Record<string, unknown[]> = {};
-  const toScVal = (raw: unknown): xdr.ScVal =>
-    raw instanceof xdr.ScVal ? raw : xdr.ScVal.fromXDR(raw as string, 'base64');
-
+/** Convert raw RPC events into fixture rows grouped by command symbol. */
+function eventsToRows(events: Awaited<ReturnType<typeof fetchFor>>): Record<string, FixtureRow[]> {
+  const bySymbol: Record<string, FixtureRow[]> = {};
   for (const ev of events) {
     const topicsJson = (ev.topic as unknown[]).map((t) => scvalToGoldsky(toScVal(t)));
     const dataJson = scvalToGoldsky(toScVal(ev.value));
@@ -101,7 +102,7 @@ async function main(): Promise<void> {
     const rawContractId = (ev as { contractId?: unknown }).contractId;
     const emitter =
       typeof rawContractId === 'string' ? rawContractId : String(rawContractId ?? '');
-    const row = {
+    const row: FixtureRow = {
       id: ev.id,
       transaction_hash: ev.txHash,
       ledger_sequence: Number(ev.ledger),
@@ -114,10 +115,75 @@ async function main(): Promise<void> {
     };
     (bySymbol[symbol] ??= []).push(row);
   }
+  return bySymbol;
+}
 
+/** Read existing fixture files and return the highest ledger_sequence seen. */
+function loadExistingFixtures(): { bySymbol: Record<string, FixtureRow[]>; maxLedger: number } {
+  const bySymbol: Record<string, FixtureRow[]> = {};
+  let maxLedger = 0;
+  if (!fs.existsSync(FIXTURE_DIR)) return { bySymbol, maxLedger };
+  for (const file of fs.readdirSync(FIXTURE_DIR).filter((f) => f.endsWith('.json'))) {
+    const symbol = path.basename(file, '.json');
+    const rows: FixtureRow[] = JSON.parse(fs.readFileSync(path.join(FIXTURE_DIR, file), 'utf8'));
+    bySymbol[symbol] = rows;
+    for (const r of rows) {
+      if (r.ledger_sequence > maxLedger) maxLedger = r.ledger_sequence;
+    }
+  }
+  return { bySymbol, maxLedger };
+}
+
+/** Extract sub-registry contract IDs from sub_reg fixture rows. */
+function extractSubRegistryIds(rows: FixtureRow[]): string[] {
+  const ids: string[] = [];
+  for (const row of rows) {
+    const data = JSON.parse(row.data) as {
+      map?: { key: { symbol?: string }; val: { address?: string } }[];
+    };
+    for (const entry of data.map ?? []) {
+      if (entry.key.symbol === 'contract_id' && entry.val.address) {
+        ids.push(entry.val.address);
+      }
+    }
+  }
+  return ids;
+}
+
+/** Fetch events for the root contract and all known sub-registries. */
+async function fetchAllContracts(
+  startLedger: number,
+  existingSubRegRows?: FixtureRow[],
+): Promise<Awaited<ReturnType<typeof fetchFor>>> {
+  // Fetch root events first.
+  const rootEvents = await fetchFor(CURRENT_ROOT, startLedger);
+  console.log(`  root: ${rootEvents.length} events`);
+
+  // Discover sub-registry contract IDs from both freshly fetched and
+  // previously existing sub_reg rows.
+  const freshRows = eventsToRows(rootEvents);
+  const allSubRegRows = [
+    ...(freshRows['sub_reg'] ?? []),
+    ...(existingSubRegRows ?? []),
+  ];
+  const subIds = [...new Set(extractSubRegistryIds(allSubRegRows))]
+    .filter((id) => id !== CURRENT_ROOT);
+
+  // Fetch events from each sub-registry in parallel.
+  const subResults = await Promise.all(
+    subIds.map(async (id) => {
+      const events = await fetchFor(id, startLedger);
+      console.log(`  sub-registry ${id}: ${events.length} events`);
+      return events;
+    }),
+  );
+
+  return [...rootEvents, ...subResults.flat()];
+}
+
+/** Write grouped fixture rows to disk. */
+function writeFixtures(bySymbol: Record<string, FixtureRow[]>): void {
   fs.mkdirSync(FIXTURE_DIR, { recursive: true });
-  // Clear stale per-symbol files so a shrinking event set doesn't leave
-  // leftovers from a previous refresh.
   for (const existing of fs.readdirSync(FIXTURE_DIR)) {
     if (existing.endsWith('.json')) {
       fs.unlinkSync(path.join(FIXTURE_DIR, existing));
@@ -127,6 +193,78 @@ async function main(): Promise<void> {
     const file = path.join(FIXTURE_DIR, `${symbol}.json`);
     fs.writeFileSync(file, JSON.stringify(rows, null, 2) + '\n');
     console.log(`wrote ${rows.length} ${symbol} events → ${file}`);
+  }
+}
+
+/** Wipe and replace: fetch everything in the lookback window. */
+async function refresh(): Promise<void> {
+  const server = new SorobanRpc.Server(RPC_URL);
+  const latest = await server.getLatestLedger();
+  const startLedger = Math.max(latest.sequence - LOOKBACK_LEDGERS, 1);
+
+  console.log(
+    `fetching events from ledger ${startLedger} → ${latest.sequence}`,
+  );
+
+  const events = await fetchAllContracts(startLedger);
+  console.log(`decoded ${events.length} total events`);
+  if (events.length === 0) {
+    console.log('no events in the retention window');
+    console.log('fixtures will be empty; real-data test suite will skip');
+  }
+
+  writeFixtures(eventsToRows(events));
+}
+
+/** Incremental pull: keep existing fixtures and append only newer events. */
+async function pull(): Promise<void> {
+  const { bySymbol: existing, maxLedger } = loadExistingFixtures();
+  const existingIds = new Set<string>();
+  for (const rows of Object.values(existing)) {
+    for (const r of rows) existingIds.add(r.id);
+  }
+
+  const server = new SorobanRpc.Server(RPC_URL);
+  const latest = await server.getLatestLedger();
+  // Start one ledger after the last one we already have, but never older
+  // than the RPC retention window (the RPC silently returns nothing if the
+  // startLedger is outside its ~10k-ledger window).
+  const retentionFloor = Math.max(latest.sequence - LOOKBACK_LEDGERS, 1);
+  const startLedger = maxLedger > 0
+    ? Math.max(maxLedger + 1, retentionFloor)
+    : retentionFloor;
+
+  console.log(
+    `pulling new events from ledger ${startLedger} → ${latest.sequence}` +
+      (maxLedger > 0 ? ` (existing max ledger: ${maxLedger})` : ' (no existing fixtures, full fetch)'),
+  );
+
+  const events = await fetchAllContracts(startLedger, existing['sub_reg']);
+  const newRows = eventsToRows(events);
+
+  // Deduplicate by event id and merge into existing fixtures.
+  let added = 0;
+  for (const [symbol, rows] of Object.entries(newRows)) {
+    if (!existing[symbol]) existing[symbol] = [];
+    for (const row of rows) {
+      if (!existingIds.has(row.id)) {
+        existing[symbol].push(row);
+        existingIds.add(row.id);
+        added++;
+      }
+    }
+  }
+
+  console.log(`fetched ${events.length} events, ${added} new`);
+  writeFixtures(existing);
+}
+
+async function main(): Promise<void> {
+  const mode = process.argv[2] ?? 'refresh';
+  if (mode === 'pull') {
+    await pull();
+  } else {
+    await refresh();
   }
 }
 

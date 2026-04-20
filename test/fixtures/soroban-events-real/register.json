@@ -64,5 +64,60 @@
     "emitter_contract_id": "CBNBQND6EMYTTRTCUWUJ3VIKF7RUUISK5T4GAKTXRVIQRHGP4XQY4ID7",
     "data": "{\"map\":[{\"key\":{\"symbol\":\"contract_id\"},\"val\":{\"address\":\"CBJIBSIHQ4SDVIKH4BFUNDPI47IXIGW3ETGYCH3MMA4C4MDGUXJRDAW3\"}},{\"key\":{\"symbol\":\"contract_name\"},\"val\":{\"string\":\"defindex\"}},{\"key\":{\"symbol\":\"sac\"},\"val\":{\"bool\":false}},{\"key\":{\"symbol\":\"wasm_hash\"},\"val\":{\"bytes\":\"b038a31da054b4a174b4d5b81b52691f67c21f6004cf233c37175e63a87304df\"}}]}",
     "topics": "[{\"symbol\":\"register\"}]"
+  },
+  {
+    "id": "0008975983432478720-0000000000",
+    "transaction_hash": "2d60aecbc82811d6082801ed7027113f544a2765a36cff791d369891f25519a5",
+    "ledger_sequence": 2089884,
+    "created_at": "2026-04-17T19:31:13Z",
+    "command": "register",
+    "channel": "CBJIBSIHQ4SDVIKH4BFUNDPI47IXIGW3ETGYCH3MMA4C4MDGUXJRDAW3",
+    "emitter_contract_id": "CBJIBSIHQ4SDVIKH4BFUNDPI47IXIGW3ETGYCH3MMA4C4MDGUXJRDAW3",
+    "data": "{\"map\":[{\"key\":{\"symbol\":\"contract_id\"},\"val\":{\"address\":\"CDSCWE4GLNBYYTES2OCYDFQA2LLY4RBIAX6ZI32VSUXD7GO6HRPO4A32\"}},{\"key\":{\"symbol\":\"contract_name\"},\"val\":{\"string\":\"factory\"}},{\"key\":{\"symbol\":\"sac\"},\"val\":{\"bool\":false}},{\"key\":{\"symbol\":\"wasm_hash\"},\"val\":{\"bytes\":\"baba1e5e12e7f83b49f6f2b6b17f7bc672e38c08dca74f77d66d569c522cfec8\"}}]}",
+    "topics": "[{\"symbol\":\"register\"}]"
+  },
+  {
+    "id": "0008975983432478720-0000000001",
+    "transaction_hash": "2d60aecbc82811d6082801ed7027113f544a2765a36cff791d369891f25519a5",
+    "ledger_sequence": 2089884,
+    "created_at": "2026-04-17T19:31:13Z",
+    "command": "register",
+    "channel": "CBJIBSIHQ4SDVIKH4BFUNDPI47IXIGW3ETGYCH3MMA4C4MDGUXJRDAW3",
+    "emitter_contract_id": "CBJIBSIHQ4SDVIKH4BFUNDPI47IXIGW3ETGYCH3MMA4C4MDGUXJRDAW3",
+    "data": "{\"map\":[{\"key\":{\"symbol\":\"contract_id\"},\"val\":{\"address\":\"CBMVK2JK6NTOT2O4HNQAIQFJY232BHKGLIMXDVQVHIIZKDACXDFZDWHN\"}},{\"key\":{\"symbol\":\"contract_name\"},\"val\":{\"string\":\"usdc-vault\"}},{\"key\":{\"symbol\":\"sac\"},\"val\":{\"bool\":false}},{\"key\":{\"symbol\":\"wasm_hash\"},\"val\":{\"bytes\":\"f345228dca59c6605789620e9ec62ff4847a0927c33dac7581a955fe746016be\"}}]}",
+    "topics": "[{\"symbol\":\"register\"}]"
+  },
+  {
+    "id": "0008975983432478720-0000000002",
+    "transaction_hash": "2d60aecbc82811d6082801ed7027113f544a2765a36cff791d369891f25519a5",
+    "ledger_sequence": 2089884,
+    "created_at": "2026-04-17T19:31:13Z",
+    "command": "register",
+    "channel": "CBJIBSIHQ4SDVIKH4BFUNDPI47IXIGW3ETGYCH3MMA4C4MDGUXJRDAW3",
+    "emitter_contract_id": "CBJIBSIHQ4SDVIKH4BFUNDPI47IXIGW3ETGYCH3MMA4C4MDGUXJRDAW3",
+    "data": "{\"map\":[{\"key\":{\"symbol\":\"contract_id\"},\"val\":{\"address\":\"CCLV4H7WTLJQ7ATLHBBQV2WW3OINF3FOY5XZ7VPHZO7NH3D2ZS4GFSF6\"}},{\"key\":{\"symbol\":\"contract_name\"},\"val\":{\"string\":\"xlm-vault\"}},{\"key\":{\"symbol\":\"sac\"},\"val\":{\"bool\":false}},{\"key\":{\"symbol\":\"wasm_hash\"},\"val\":{\"bytes\":\"f345228dca59c6605789620e9ec62ff4847a0927c33dac7581a955fe746016be\"}}]}",
+    "topics": "[{\"symbol\":\"register\"}]"
+  },
+  {
+    "id": "0008975983432478720-0000000003",
+    "transaction_hash": "2d60aecbc82811d6082801ed7027113f544a2765a36cff791d369891f25519a5",
+    "ledger_sequence": 2089884,
+    "created_at": "2026-04-17T19:31:13Z",
+    "command": "register",
+    "channel": "CBJIBSIHQ4SDVIKH4BFUNDPI47IXIGW3ETGYCH3MMA4C4MDGUXJRDAW3",
+    "emitter_contract_id": "CBJIBSIHQ4SDVIKH4BFUNDPI47IXIGW3ETGYCH3MMA4C4MDGUXJRDAW3",
+    "data": "{\"map\":[{\"key\":{\"symbol\":\"contract_id\"},\"val\":{\"address\":\"CBIS5TEMTNNOTBE3WXPQUAGUEDYZZVIWAKTXEQCOUJ34OJJ3FJ5NLF2P\"}},{\"key\":{\"symbol\":\"contract_name\"},\"val\":{\"string\":\"cetes-vault\"}},{\"key\":{\"symbol\":\"sac\"},\"val\":{\"bool\":false}},{\"key\":{\"symbol\":\"wasm_hash\"},\"val\":{\"bytes\":\"f345228dca59c6605789620e9ec62ff4847a0927c33dac7581a955fe746016be\"}}]}",
+    "topics": "[{\"symbol\":\"register\"}]"
+  },
+  {
+    "id": "0008975983432478720-0000000004",
+    "transaction_hash": "2d60aecbc82811d6082801ed7027113f544a2765a36cff791d369891f25519a5",
+    "ledger_sequence": 2089884,
+    "created_at": "2026-04-17T19:31:13Z",
+    "command": "register",
+    "channel": "CBJIBSIHQ4SDVIKH4BFUNDPI47IXIGW3ETGYCH3MMA4C4MDGUXJRDAW3",
+    "emitter_contract_id": "CBJIBSIHQ4SDVIKH4BFUNDPI47IXIGW3ETGYCH3MMA4C4MDGUXJRDAW3",
+    "data": "{\"map\":[{\"key\":{\"symbol\":\"contract_id\"},\"val\":{\"address\":\"CCP4RBDWPRNO2LWO23XFU4BBLGA73J5N3BK7EHRJUHVN33YEMMFB2MBE\"}},{\"key\":{\"symbol\":\"contract_name\"},\"val\":{\"string\":\"cetes-blend-strategy\"}},{\"key\":{\"symbol\":\"sac\"},\"val\":{\"bool\":false}},{\"key\":{\"symbol\":\"wasm_hash\"},\"val\":{\"bytes\":\"7ddf1f6ac5705be937fd10ba3c199e21ab8e46c6fad322e10004d4a49b504769\"}}]}",
+    "topics": "[{\"symbol\":\"register\"}]"
   }
 ]

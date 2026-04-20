@@ -1,0 +1,24 @@
+[
+  {
+    "id": "0009184160497328128-0000000000",
+    "transaction_hash": "01b50de58fcb0bc898a32e80229ffd7777ee2ca3f3d9d5a2cf1d0baa98fe44b3",
+    "ledger_sequence": 2138354,
+    "created_at": "2026-04-20T14:57:16Z",
+    "command": "update_owner",
+    "channel": "CBNBQND6EMYTTRTCUWUJ3VIKF7RUUISK5T4GAKTXRVIQRHGP4XQY4ID7",
+    "emitter_contract_id": "CBNBQND6EMYTTRTCUWUJ3VIKF7RUUISK5T4GAKTXRVIQRHGP4XQY4ID7",
+    "data": "{\"map\":[{\"key\":{\"symbol\":\"contract_name\"},\"val\":{\"string\":\"unverified\"}},{\"key\":{\"symbol\":\"new_owner\"},\"val\":{\"address\":\"GA7Y5MOUJAKWQYR3VD4V5CXILOR2XI3LLJJ4S36YFT557HG5AA5KPXRE\"}}]}",
+    "topics": "[{\"symbol\":\"update_owner\"}]"
+  },
+  {
+    "id": "0009184173382213632-0000000000",
+    "transaction_hash": "e6031ec1b42f7dc14d9621ed57394aa0e79e4e6c8ab9e1e98e4b523132cf4ab2",
+    "ledger_sequence": 2138357,
+    "created_at": "2026-04-20T14:57:31Z",
+    "command": "update_owner",
+    "channel": "CBNBQND6EMYTTRTCUWUJ3VIKF7RUUISK5T4GAKTXRVIQRHGP4XQY4ID7",
+    "emitter_contract_id": "CBNBQND6EMYTTRTCUWUJ3VIKF7RUUISK5T4GAKTXRVIQRHGP4XQY4ID7",
+    "data": "{\"map\":[{\"key\":{\"symbol\":\"contract_name\"},\"val\":{\"string\":\"unverified\"}},{\"key\":{\"symbol\":\"new_owner\"},\"val\":{\"address\":\"GAMPJROHOAW662FINQ4XQOY2ULX5IEGYXCI4SMZYE75EHQBR6PSTJG3M\"}}]}",
+    "topics": "[{\"symbol\":\"update_owner\"}]"
+  }
+]
