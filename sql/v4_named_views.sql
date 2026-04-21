@@ -9,16 +9,16 @@
 -- encapsulate that translation so individual queries don't each repeat
 -- the LEFT JOIN + COALESCE.
 
-CREATE OR REPLACE VIEW v4_published_wasms_named AS
+CREATE OR REPLACE VIEW v4_published_wasms_with_channel AS
 SELECT
   w.*,
-  COALESCE(r.channel, w.channel) AS resolved_channel
+  r.registry_channel AS channel
 FROM public.v4_published_wasms w
-LEFT JOIN public.v4_registries r ON r.contract_id = w.channel;
+JOIN public.v4_registries r ON r.contract_id = w.emitter_contract_id;
 
-CREATE OR REPLACE VIEW v4_registered_contracts_named AS
+CREATE OR REPLACE VIEW v4_registered_contracts_with_channel AS
 SELECT
   c.*,
-  COALESCE(r.channel, c.channel) AS resolved_channel
+  r.registry_channel AS channel
 FROM public.v4_registered_contracts c
-LEFT JOIN public.v4_registries r ON r.contract_id = c.channel;
+JOIN public.v4_registries r ON r.contract_id = c.emitter_contract_id;
