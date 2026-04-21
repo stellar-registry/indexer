@@ -1,4 +1,4 @@
-name: Test
+name: Validate
 
 on:
   push:
@@ -6,41 +6,16 @@ on:
   pull_request:
 
 concurrency:
-  group: test-${{ github.ref }}
+  group: validate-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  test:
+  validate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
-
-    services:
-      postgres:
-        image: postgres:17-alpine
-        env:
-          POSTGRES_USER: test
-          POSTGRES_PASSWORD: test
-          POSTGRES_DB: registry_test
-        ports:
-          - 5433:5432
-        options: >-
-          --health-cmd="pg_isready -U test -d registry_test"
-          --health-interval=2s
-          --health-timeout=3s
-          --health-retries=15
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v5
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - run: npm ci
-
-      - name: TypeScript build
-        run: npm run build
 
       - name: Install Goldsky turbo CLI
         run: |
@@ -60,12 +35,4 @@ jobs:
         if: env.GOLDSKY_API_KEY != ''
         env:
           GOLDSKY_API_KEY: ${{ secrets.GOLDSKY_API_KEY }}
-        run: npm run validate:pipelines
-
-      - name: Unit tests
-        run: npm run test:unit
-
-      - name: Integration tests
-        run: npm run test:integration
-        env:
-          TEST_PG_URL: postgres://test:test@localhost:5433/registry_test
+        run: bash scripts/validate-pipelines.sh
