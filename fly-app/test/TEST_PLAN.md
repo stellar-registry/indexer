@@ -4,10 +4,7 @@ Check all these endpoints in production...
 
 - https://registry-indexer.fly.dev/
 - https://registry-indexer.fly.dev/v1
-<<<<<<< HEAD
 - https://registry-indexer.fly.dev/v1/registries
-=======
->>>>>>> e4e3aa1 (add test plan)
 - https://registry-indexer.fly.dev/v1/wasms
 - https://registry-indexer.fly.dev/v1/wasms/registry
 - https://registry-indexer.fly.dev/v1/wasms/unverified/guess-the-number
@@ -19,10 +16,7 @@ Check all these endpoints in production...
 
 - http://localhost:4444/
 - http://localhost:4444/v1
-<<<<<<< HEAD
 - http://localhost:4444/v1/registries
-=======
->>>>>>> e4e3aa1 (add test plan)
 - http://localhost:4444/v1/wasms
 - http://localhost:4444/v1/wasms/registry
 - http://localhost:4444/v1/wasms/unverified/guess-the-number

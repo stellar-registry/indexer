@@ -77,55 +77,65 @@ struct ContractResult {
     deployer: Option<String>,
     wasm_version: Option<String>,
     wasm_name: Option<String>,
+    wasm_channel: Option<String>,
     #[serde(rename = "is_stellar_asset_contract")]
     sac: Option<bool>,
 }
 
 /// Full detail for /contracts/{contract_name} endpoint
 ///
-/// From table "v4_deployed_contracts":
+/// From Table "public.v4_deployed_contracts"
+///       Column         |            Type             | Collation | Nullable | Default
+///----------------------+-----------------------------+-----------+----------+---------
+/// id                   | text                        |           | not null |
+/// transaction_hash     | text                        |           |          |
+/// ledger_sequence      | bigint                      |           |          |
+/// created_at           | timestamp without time zone |           |          |
+/// emitter_contract_id  | text                        |           |          |
+/// wasm_name            | text                        |           |          |
+/// wasm_version         | text                        |           |          |
+/// deployer             | text                        |           |          |
+/// contract_id          | text                        |           |          |
+/// registry_contract_id | text                        |           |          |
 ///
-/// ```
-/// Column      |            Type             | Collation | Nullable | Default
-/// ------------------+-----------------------------+-----------+----------+---------
-/// id               | text                        |           | not null |
-/// transaction_hash | text                        |           | not null |
-/// ledger_sequence  | bigint                      |           | not null |
-/// created_at       | timestamp without time zone |           | not null |
-/// channel    | text                        |           |          |
-/// wasm_name        | text                        |           |          |
-/// wasm_version     | text                        |           |          |
-/// deployer         | text                        |           |          |
-/// contract_id      | text                        |           |          |
-/// ```
-/// And table `v4_registered_contracts`
-/// ```
-///       Column      |            Type             | Collation | Nullable | Default
-/// ------------------+-----------------------------+-----------+----------+---------
-///  id               | text                        |           | not null |
-///  transaction_hash | text                        |           | not null |
-///  ledger_sequence  | bigint                      |           | not null |
-///  created_at       | timestamp without time zone |           | not null |
-///  channel    | text                        |           |          |
-///  contract_name    | text                        |           |          |
-///  contract_id      | text                        |           |          |
-/// ```
+/// ...and Table "public.v4_registered_contracts"
+///       Column        |            Type             | Collation | Nullable | Default
+///---------------------+-----------------------------+-----------+----------+---------
+/// id                  | text                        |           | not null |
+/// transaction_hash    | text                        |           |          |
+/// ledger_sequence     | bigint                      |           |          |
+/// created_at          | timestamp without time zone |           |          |
+/// emitter_contract_id | text                        |           |          |
+/// contract_name       | text                        |           |          |
+/// contract_id         | text                        |           |          |
+/// sac                 | boolean                     |           |          |
+/// wasm_hash           | text                        |           |          |
 #[derive(sqlx::FromRow, Serialize)]
 struct ContractDetail {
     id: String,
     transaction_hash: String,
     ledger_sequence: i64,
     created_at: chrono::NaiveDateTime,
-    channel: Option<String>,
     contract_id: Option<String>,
     contract_name: Option<String>,
+    channel: Option<String>,
     deployer: Option<String>,
     wasm_version: Option<String>,
     wasm_name: Option<String>,
+    wasm_channel: Option<String>,
     #[serde(rename = "is_stellar_asset_contract")]
     sac: Option<bool>,
 }
 
+/// From Table "public.v4_registries"
+///      Column      |            Type             | Collation | Nullable | Default
+///------------------+-----------------------------+-----------+----------+---------
+/// id               | text                        |           |          |
+/// transaction_hash | text                        |           |          |
+/// ledger_sequence  | bigint                      |           |          |
+/// created_at       | timestamp without time zone |           |          |
+/// contract_id      | text                        |           | not null |
+/// registry_channel | text                        |           |          |
 #[derive(sqlx::FromRow, Serialize)]
 struct Registry {
     contract_id: String,
@@ -359,7 +369,8 @@ async fn get_contracts_root(
                 registered.sac,
                 deployed.deployer,
                 wasms.wasm_version,
-                wasms.wasm_name
+                wasms.wasm_name,
+                registries.registry_channel AS wasm_channel
             FROM public.v4_registered_contracts_with_channel registered
             LEFT JOIN (
                 SELECT DISTINCT ON (wasm_hash) wasm_hash, wasm_version, wasm_name
@@ -367,10 +378,14 @@ async fn get_contracts_root(
                 ORDER BY wasm_hash, ledger_sequence DESC
             ) wasms ON wasms.wasm_hash = registered.wasm_hash
             LEFT JOIN (
-                SELECT DISTINCT ON (contract_id) contract_id, deployer
+                SELECT DISTINCT ON (contract_id) contract_id, deployer, registry_contract_id
                 FROM public.v4_deployed_contracts
                 ORDER BY contract_id, ledger_sequence DESC
             ) deployed ON deployed.contract_id = registered.contract_id
+            LEFT JOIN (
+                SELECT DISTINCT ON (contract_id) contract_id, registry_channel
+                FROM public.v4_registries
+            ) registries ON deployed.registry_contract_id = registries.contract_id
             WHERE (registered.ledger_sequence, registered.id) >= ($1, $2)
             ORDER BY registered.ledger_sequence, registered.id ASC
             LIMIT $3",
@@ -434,7 +449,8 @@ async fn fetch_single_contract(
                 registered.sac,
                 deployed.deployer,
                 wasms.wasm_version,
-                wasms.wasm_name
+                wasms.wasm_name,
+                registries.registry_channel AS wasm_channel
             FROM public.v4_registered_contracts_with_channel registered
             LEFT JOIN (
                 SELECT DISTINCT ON (wasm_hash) wasm_hash, wasm_version, wasm_name
@@ -442,10 +458,14 @@ async fn fetch_single_contract(
                 ORDER BY wasm_hash, ledger_sequence DESC
             ) wasms ON wasms.wasm_hash = registered.wasm_hash
             LEFT JOIN (
-                SELECT DISTINCT ON (contract_id) contract_id, deployer
+                SELECT DISTINCT ON (contract_id) contract_id, deployer, registry_contract_id
                 FROM public.v4_deployed_contracts
                 ORDER BY contract_id, ledger_sequence DESC
             ) deployed ON deployed.contract_id = registered.contract_id
+            LEFT JOIN (
+                SELECT DISTINCT ON (contract_id) contract_id, registry_channel
+                FROM public.v4_registries
+            ) registries ON deployed.registry_contract_id = registries.contract_id
             WHERE registered.contract_name = $1
               AND registered.channel = $2
             ORDER BY registered.ledger_sequence DESC
