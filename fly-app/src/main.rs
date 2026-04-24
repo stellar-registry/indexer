@@ -1,7 +1,12 @@
-use actix_web::{web, App, HttpResponse, HttpServer};
+mod generated;
+mod test;
+
+use actix_web::dev::{ServiceFactory, ServiceRequest};
+use actix_web::web::Data;
+use actix_web::{web, App, Error, HttpResponse, HttpServer};
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgPoolOptions;
-use sqlx::{Execute, PgPool};
+use sqlx::PgPool;
 
 #[derive(Deserialize)]
 struct QueryParams {
@@ -140,8 +145,8 @@ pub fn serialize_raw<S: serde::Serializer>(val: &Option<String>, s: S) -> Result
     match val {
         None => s.serialize_none(),
         Some(raw) => {
-            let v: serde_json::Value = serde_json::from_str(raw)
-                .map_err(serde::ser::Error::custom)?;
+            let v: serde_json::Value =
+                serde_json::from_str(raw).map_err(serde::ser::Error::custom)?;
             v.serialize(s)
         }
     }
@@ -576,9 +581,53 @@ async fn health() -> HttpResponse {
     HttpResponse::Ok().finish()
 }
 
+fn setup_routes<T>(app: App<T>) -> App<T>
+where
+    T: ServiceFactory<ServiceRequest, Config = (), Error = Error, InitError = ()>,
+{
+    app.route("/", web::get().to(index))
+        .route("/v1", web::get().to(index_v1))
+        .route("/v1/wasms", web::get().to(get_wasms))
+        .route(
+            "/v1/wasms/{wasm_name}",
+            web::get().to(get_wasm_main_channel),
+        )
+        .route(
+            "/v1/wasms/{channel}/{wasm_name}",
+            web::get().to(get_wasm_latest),
+        )
+        .route(
+            "/v1/wasms/{wasm_name}/v/{version}",
+            web::get().to(get_wasm_version_main),
+        )
+        .route(
+            "/v1/wasms/{channel}/{wasm_name}/v/{version}",
+            web::get().to(get_wasm_version),
+        )
+        .route("/v1/contracts", web::get().to(get_contracts_main))
+        .route(
+            "/v1/contracts/{contract_name}",
+            web::get().to(get_single_contract_main),
+        )
+        .route(
+            "/v1/contracts/{channel}/{contract_name}",
+            web::get().to(get_single_contract),
+        )
+        .route(
+            "/v1/contract_deploy_details/{channel}/{contract_name}",
+            web::get().to(get_contract_deploy_detail),
+        )
+        .route("/health", web::get().to(health))
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+
+    let port: u16 = std::env::var("PORT")
+        .unwrap_or_else(|_| "8080".to_string())
+        .parse()
+        .expect("PORT must be a valid number");
 
     let pool = PgPoolOptions::new()
         .max_connections(5)
@@ -586,51 +635,10 @@ async fn main() -> std::io::Result<()> {
         .await
         .expect("Failed to connect to database");
 
-    let port: u16 = std::env::var("PORT")
-        .unwrap_or_else(|_| "8080".to_string())
-        .parse()
-        .expect("PORT must be a valid number");
-
     println!("Starting server on port {port}");
 
-    HttpServer::new(move || {
-        App::new()
-            .app_data(web::Data::new(pool.clone()))
-            .route("/", web::get().to(index))
-            .route("/v1", web::get().to(index_v1))
-            .route("/v1/wasms", web::get().to(get_wasms))
-            .route(
-                "/v1/wasms/{wasm_name}",
-                web::get().to(get_wasm_main_channel),
-            )
-            .route(
-                "/v1/wasms/{channel}/{wasm_name}",
-                web::get().to(get_wasm_latest),
-            )
-            .route(
-                "/v1/wasms/{wasm_name}/v/{version}",
-                web::get().to(get_wasm_version_main),
-            )
-            .route(
-                "/v1/wasms/{channel}/{wasm_name}/v/{version}",
-                web::get().to(get_wasm_version),
-            )
-            .route("/v1/contracts", web::get().to(get_contracts_main))
-            .route(
-                "/v1/contracts/{contract_name}",
-                web::get().to(get_single_contract_main),
-            )
-            .route(
-                "/v1/contracts/{channel}/{contract_name}",
-                web::get().to(get_single_contract),
-            )
-            .route(
-                "/v1/contract_deploy_details/{channel}/{contract_name}",
-                web::get().to(get_contract_deploy_detail),
-            )
-            .route("/health", web::get().to(health))
-    })
-    .bind(("0.0.0.0", port))?
-    .run()
-    .await
+    HttpServer::new(move || setup_routes(App::new().app_data(Data::new(pool.clone()))))
+        .bind(("0.0.0.0", port))?
+        .run()
+        .await
 }
