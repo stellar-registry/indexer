@@ -89,14 +89,22 @@ echo ""
 
 # 5. Apply post_init.sql (if present), retrying until Goldsky has
 #    created the sink tables the script depends on. Any psql error
-#    (e.g. "relation ... does not exist") triggers a retry.
+#    (e.g. "relation ... does not exist") triggers a retry. psql
+#    stderr is suppressed on non-final attempts so the expected
+#    "relation does not exist" noise doesn't clutter the log; the
+#    final attempt lets stderr through so real failures surface.
 if [[ -f "$POST_INIT_SQL" ]]; then
   max_attempts="${POST_INIT_MAX_ATTEMPTS:-12}"
   delay="${POST_INIT_RETRY_DELAY:-5}"
   echo "==> applying $POST_INIT_SQL (up to $max_attempts attempts, ${delay}s apart)..."
   attempt=1
   while true; do
-    if psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$POST_INIT_SQL"; then
+    if (( attempt < max_attempts )); then
+      psql_stderr=/dev/null
+    else
+      psql_stderr=/dev/stderr
+    fi
+    if psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f "$POST_INIT_SQL" 2>"$psql_stderr"; then
       echo "==> post_init.sql applied (attempt $attempt/$max_attempts)"
       break
     fi
