@@ -32,7 +32,6 @@ pub async fn test_get(path: &str, expected_json: &str) {
 #[cfg(test)]
 mod tests {
     use crate::test::test_get;
-    use actix_web::test;
 
     #[actix_web::test]
     async fn test_index_get() {

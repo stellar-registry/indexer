@@ -18,7 +18,7 @@ jobs:
       # We can use the service container directly or run docker-compose
       # Using docker-compose as requested to ensure it matches local setup
       postgres:
-        image: postgres:15-alpine
+        image: postgres:17-alpine
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -41,10 +41,16 @@ jobs:
     - name: Rust Cache
       uses: Swatinem/rust-cache@v2
 
+    - name: Initialize role
+      run: |
+        PGPASSWORD=postgres psql -h localhost -U postgres -d postgres -f 1_role.sql
+      working-directory: ./fly-app/sql
+
+
     - name: Initialize database
       run: |
         PGPASSWORD=postgres psql -h localhost -U postgres -d postgres -f dump.sql
-      working-directory: ./fly-app
+      working-directory: ./fly-app/sql
 
     - name: Run tests
       run: cargo test
