@@ -1,0 +1,110 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: registry_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd="pg_isready -U test -d registry_test"
+          --health-interval=2s
+          --health-timeout=3s
+          --health-retries=15
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: TypeScript build
+        run: npm run build
+
+      - name: Install Goldsky turbo CLI
+        run: |
+          curl -fsSL https://install-turbo.goldsky.com | bash
+          echo "$HOME/.goldsky/bin" >> "$GITHUB_PATH"
+
+      - name: Authenticate Goldsky CLI
+        if: env.GOLDSKY_API_KEY != ''
+        env:
+          GOLDSKY_API_KEY: ${{ secrets.GOLDSKY_API_KEY }}
+        run: |
+          mkdir -p "$HOME/.goldsky"
+          printf '%s' "$GOLDSKY_API_KEY" > "$HOME/.goldsky/auth_token"
+          chmod 600 "$HOME/.goldsky/auth_token"
+
+      - name: Validate Goldsky pipelines
+        if: env.GOLDSKY_API_KEY != ''
+        env:
+          GOLDSKY_API_KEY: ${{ secrets.GOLDSKY_API_KEY }}
+        run: npm run validate:pipelines
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      - name: Integration tests
+        run: npm run test:integration
+        env:
+          TEST_PG_URL: postgres://test:test@localhost:5433/registry_test
+
+  fly-app:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: fly-app
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: registry_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd="pg_isready -U test -d registry_test"
+          --health-interval=2s
+          --health-timeout=3s
+          --health-retries=15
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fly-app
+
+      - name: Cargo build (tests)
+        run: cargo build --tests
+
+      - name: Cargo test
+        run: cargo test --no-fail-fast
+        env:
+          TEST_DATABASE_URL: postgres://test:test@localhost:5433/registry_test

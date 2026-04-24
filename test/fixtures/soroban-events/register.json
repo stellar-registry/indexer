@@ -1,0 +1,24 @@
+[
+  {
+    "id": "0000002038120-0000000001-0001-0001",
+    "transaction_hash": "register0001hash",
+    "ledger_sequence": 2038120,
+    "created_at": "2026-04-01T00:02:00Z",
+    "command": "register",
+    "channel": "CCHANNELREGISTER000000000000000000000000000000000000",
+    "emitter_contract_id": "CCHANNELREGISTER000000000000000000000000000000000000",
+    "data": "{\"map\":[{\"key\":{\"symbol\":\"contract_name\"},\"val\":{\"string\":\"token_a\"}},{\"key\":{\"symbol\":\"contract_id\"},\"val\":{\"address\":\"CREGISTERED0000000000000000000000000000000000000000000\"}},{\"key\":{\"symbol\":\"sac\"},\"val\":{\"bool\":true}},{\"key\":{\"symbol\":\"wasm_hash\"},\"val\":{\"bytes\":\"00\"}}]}",
+    "topics": "[{\"symbol\":\"register\"}]"
+  },
+  {
+    "id": "0000002038121-0000000001-0001-0001",
+    "transaction_hash": "register0002hash",
+    "ledger_sequence": 2038121,
+    "created_at": "2026-04-01T00:02:01Z",
+    "command": "register",
+    "channel": "CCHANNELREGISTER000000000000000000000000000000000000",
+    "emitter_contract_id": "CCHANNELREGISTER000000000000000000000000000000000000",
+    "data": "{\"map\":[{\"key\":{\"symbol\":\"wasm_hash\"},\"val\":{\"bytes\":\"abcd1234\"}},{\"key\":{\"symbol\":\"sac\"},\"val\":{\"bool\":false}},{\"key\":{\"symbol\":\"contract_id\"},\"val\":{\"address\":\"CREGISTERED20000000000000000000000000000000000000000000\"}},{\"key\":{\"symbol\":\"contract_name\"},\"val\":{\"string\":\"token_b\"}}]}",
+    "topics": "[{\"symbol\":\"register\"}]"
+  }
+]

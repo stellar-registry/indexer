@@ -1,0 +1,13 @@
+[
+  {
+    "id": "0000002038130-0000000001-0001-0001",
+    "transaction_hash": "rename0001hash",
+    "ledger_sequence": 2038130,
+    "created_at": "2026-04-01T00:03:00Z",
+    "command": "rename",
+    "channel": "CCHANNELRENAME0000000000000000000000000000000000000",
+    "emitter_contract_id": "CCHANNELRENAME0000000000000000000000000000000000000",
+    "data": "{\"map\":[{\"key\":{\"symbol\":\"old_name\"},\"val\":{\"string\":\"old_token\"}},{\"key\":{\"symbol\":\"new_name\"},\"val\":{\"string\":\"new_token\"}}]}",
+    "topics": "[{\"symbol\":\"rename\"}]"
+  }
+]

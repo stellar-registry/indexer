@@ -1,8 +1,21 @@
+const baseTransform = { '^.+\\.tsx?$': 'ts-jest' };
+
 module.exports = {
-  testEnvironment: 'node',
-  roots: ['<rootDir>/test'],
-  testMatch: ['**/*.test.ts'],
-  transform: {
-    '^.+\\.tsx?$': 'ts-jest'
-  }
+  projects: [
+    {
+      displayName: 'unit',
+      testEnvironment: 'node',
+      roots: ['<rootDir>/test/unit'],
+      testMatch: ['**/*.test.ts'],
+      transform: baseTransform,
+    },
+    {
+      displayName: 'integration',
+      testEnvironment: 'node',
+      roots: ['<rootDir>/test/integration'],
+      testMatch: ['**/*.test.ts'],
+      transform: baseTransform,
+      globalSetup: '<rootDir>/test/integration/globalSetup.ts',
+    },
+  ],
 };

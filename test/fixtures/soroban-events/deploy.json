@@ -1,0 +1,24 @@
+[
+  {
+    "id": "0000002038101-0000000001-0001-0001",
+    "transaction_hash": "deploy0001hash",
+    "ledger_sequence": 2038101,
+    "created_at": "2026-04-01T00:00:00Z",
+    "command": "deploy",
+    "channel": "CCHANNELDEPLOY00000000000000000000000000000000000000",
+    "emitter_contract_id": "CCHANNELDEPLOY00000000000000000000000000000000000000",
+    "data": "{\"map\":[{\"key\":{\"symbol\":\"wasm_name\"},\"val\":{\"string\":\"my_contract\"}},{\"key\":{\"symbol\":\"version\"},\"val\":{\"string\":\"1.0.0\"}},{\"key\":{\"symbol\":\"deployer\"},\"val\":{\"address\":\"GDEPLOYER0000000000000000000000000000000000000000000\"}},{\"key\":{\"symbol\":\"contract_id\"},\"val\":{\"address\":\"CDEPLOYED00000000000000000000000000000000000000000000\"}}]}",
+    "topics": "[{\"symbol\":\"deploy\"}]"
+  },
+  {
+    "id": "0000002038102-0000000001-0001-0001",
+    "transaction_hash": "deploy0002hash",
+    "ledger_sequence": 2038102,
+    "created_at": "2026-04-01T00:00:01Z",
+    "command": "deploy",
+    "channel": "CCHANNELDEPLOY00000000000000000000000000000000000000",
+    "emitter_contract_id": "CCHANNELDEPLOY00000000000000000000000000000000000000",
+    "data": "{\"map\":[{\"key\":{\"symbol\":\"contract_id\"},\"val\":{\"address\":\"CDEPLOYED20000000000000000000000000000000000000000000\"}},{\"key\":{\"symbol\":\"deployer\"},\"val\":{\"address\":\"GDEPLOYER0000000000000000000000000000000000000000000\"}},{\"key\":{\"symbol\":\"version\"},\"val\":{\"string\":\"2.0.0\"}},{\"key\":{\"symbol\":\"wasm_name\"},\"val\":{\"string\":\"other_contract\"}}]}",
+    "topics": "[{\"symbol\":\"deploy\"}]"
+  }
+]

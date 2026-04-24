@@ -1,0 +1,45 @@
+name: Deploy Goldsky Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Turbo CLI action to run"
+        required: true
+        type: choice
+        options:
+          - apply
+          - stop
+          - status
+        default: apply
+
+concurrency:
+  group: deploy-pipeline
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Goldsky turbo CLI
+        run: |
+          curl -fsSL https://install-turbo.goldsky.com | bash
+          echo "$HOME/.goldsky/bin" >> "$GITHUB_PATH"
+
+      - name: Authenticate Goldsky CLI
+        env:
+          GOLDSKY_API_KEY: ${{ secrets.GOLDSKY_API_KEY }}
+        run: |
+          mkdir -p "$HOME/.goldsky"
+          printf '%s' "$GOLDSKY_API_KEY" > "$HOME/.goldsky/auth_token"
+          chmod 600 "$HOME/.goldsky/auth_token"
+
+      - name: ${{ inputs.action }} pipeline
+        env:
+          GOLDSKY_API_KEY: ${{ secrets.GOLDSKY_API_KEY }}
+        run: |
+          "$HOME/.goldsky/bin/turbo" ${{ inputs.action }} registry-turbo-v4.yaml

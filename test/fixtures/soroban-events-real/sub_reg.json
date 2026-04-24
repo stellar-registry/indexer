@@ -1,0 +1,68 @@
+[
+  {
+    "id": "0008967204519329792-0000000002",
+    "transaction_hash": "ff8bf6923918db325448dfb0be29927cf25a4464ee63e06220975ffd1faee8a0",
+    "ledger_sequence": 2087840,
+    "created_at": "2026-04-17T16:40:33Z",
+    "command": "sub_reg",
+    "channel": "CBNBQND6EMYTTRTCUWUJ3VIKF7RUUISK5T4GAKTXRVIQRHGP4XQY4ID7",
+    "emitter_contract_id": "CBNBQND6EMYTTRTCUWUJ3VIKF7RUUISK5T4GAKTXRVIQRHGP4XQY4ID7",
+    "data": "{\"map\":[{\"key\":{\"symbol\":\"contract_id\"},\"val\":{\"address\":\"CB2JKYNOYQWO3MS6VVRTTBGHDWJICRY5DACRJZMX665L4WX2JPPM6JCG\"}},{\"key\":{\"symbol\":\"name\"},\"val\":{\"string\":\"unverified\"}}]}",
+    "topics": "[{\"symbol\":\"sub_reg\"}]"
+  },
+  {
+    "id": "0008967204519329792-0000000003",
+    "transaction_hash": "ff8bf6923918db325448dfb0be29927cf25a4464ee63e06220975ffd1faee8a0",
+    "ledger_sequence": 2087840,
+    "created_at": "2026-04-17T16:40:33Z",
+    "command": "sub_reg",
+    "channel": "CBNBQND6EMYTTRTCUWUJ3VIKF7RUUISK5T4GAKTXRVIQRHGP4XQY4ID7",
+    "emitter_contract_id": "CBNBQND6EMYTTRTCUWUJ3VIKF7RUUISK5T4GAKTXRVIQRHGP4XQY4ID7",
+    "data": "{\"map\":[{\"key\":{\"symbol\":\"contract_id\"},\"val\":{\"address\":\"CBNBQND6EMYTTRTCUWUJ3VIKF7RUUISK5T4GAKTXRVIQRHGP4XQY4ID7\"}},{\"key\":{\"symbol\":\"name\"},\"val\":{\"string\":\"root\"}}]}",
+    "topics": "[{\"symbol\":\"sub_reg\"}]"
+  },
+  {
+    "id": "0008975880353280000-0000000002",
+    "transaction_hash": "763b387095fbe79ce914920ad68f328e528fa575b512877de156549ed94a21e0",
+    "ledger_sequence": 2089860,
+    "created_at": "2026-04-17T19:29:13Z",
+    "command": "sub_reg",
+    "channel": "CBNBQND6EMYTTRTCUWUJ3VIKF7RUUISK5T4GAKTXRVIQRHGP4XQY4ID7",
+    "emitter_contract_id": "CBNBQND6EMYTTRTCUWUJ3VIKF7RUUISK5T4GAKTXRVIQRHGP4XQY4ID7",
+    "data": "{\"map\":[{\"key\":{\"symbol\":\"contract_id\"},\"val\":{\"address\":\"CB7V4U6KMQQIR5WXUST4IAMNVKMHMNXXFP7OL6DEYHSOQSA5ESOX7OLJ\"}},{\"key\":{\"symbol\":\"name\"},\"val\":{\"string\":\"circle\"}}]}",
+    "topics": "[{\"symbol\":\"sub_reg\"}]"
+  },
+  {
+    "id": "0008975919007997952-0000000002",
+    "transaction_hash": "b8c97d8b6dfe145dbe779b5fe3a825b2bd3bd9de4566ef2f952ba1216fd242ac",
+    "ledger_sequence": 2089869,
+    "created_at": "2026-04-17T19:29:58Z",
+    "command": "sub_reg",
+    "channel": "CBNBQND6EMYTTRTCUWUJ3VIKF7RUUISK5T4GAKTXRVIQRHGP4XQY4ID7",
+    "emitter_contract_id": "CBNBQND6EMYTTRTCUWUJ3VIKF7RUUISK5T4GAKTXRVIQRHGP4XQY4ID7",
+    "data": "{\"map\":[{\"key\":{\"symbol\":\"contract_id\"},\"val\":{\"address\":\"CB6LE5DSMXHWVOB5MK7OJEATEXGP6AQP6SZI3KYFS3QBR3JC6SU4S67G\"}},{\"key\":{\"symbol\":\"name\"},\"val\":{\"string\":\"soroswap\"}}]}",
+    "topics": "[{\"symbol\":\"sub_reg\"}]"
+  },
+  {
+    "id": "0008975940482846720-0000000002",
+    "transaction_hash": "813646d47aec27857cb1abb8ba0127a1db5f8f95fd63880ab975c4bd0175768d",
+    "ledger_sequence": 2089874,
+    "created_at": "2026-04-17T19:30:23Z",
+    "command": "sub_reg",
+    "channel": "CBNBQND6EMYTTRTCUWUJ3VIKF7RUUISK5T4GAKTXRVIQRHGP4XQY4ID7",
+    "emitter_contract_id": "CBNBQND6EMYTTRTCUWUJ3VIKF7RUUISK5T4GAKTXRVIQRHGP4XQY4ID7",
+    "data": "{\"map\":[{\"key\":{\"symbol\":\"contract_id\"},\"val\":{\"address\":\"CAN7ADNDY7H2U66HUNHFD5BUAHYGCPPWRTZOBPZGTFUQ4XW24CYVFXAI\"}},{\"key\":{\"symbol\":\"name\"},\"val\":{\"string\":\"blend\"}}]}",
+    "topics": "[{\"symbol\":\"sub_reg\"}]"
+  },
+  {
+    "id": "0008975966252621824-0000000002",
+    "transaction_hash": "e67e8b140ddd5695457c6ec324a1bc2eff2fbe815919c941cf1ea219932486e3",
+    "ledger_sequence": 2089880,
+    "created_at": "2026-04-17T19:30:53Z",
+    "command": "sub_reg",
+    "channel": "CBNBQND6EMYTTRTCUWUJ3VIKF7RUUISK5T4GAKTXRVIQRHGP4XQY4ID7",
+    "emitter_contract_id": "CBNBQND6EMYTTRTCUWUJ3VIKF7RUUISK5T4GAKTXRVIQRHGP4XQY4ID7",
+    "data": "{\"map\":[{\"key\":{\"symbol\":\"contract_id\"},\"val\":{\"address\":\"CBJIBSIHQ4SDVIKH4BFUNDPI47IXIGW3ETGYCH3MMA4C4MDGUXJRDAW3\"}},{\"key\":{\"symbol\":\"name\"},\"val\":{\"string\":\"defindex\"}}]}",
+    "topics": "[{\"symbol\":\"sub_reg\"}]"
+  }
+]
