@@ -18,7 +18,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 shopt -s nullglob
 # Only validate the turbo pipelines. registry-minimal.yaml is an older
 # non-turbo definition and uses a different schema.
-YAMLS=("$REPO_ROOT"/registry-turbo-*.yaml)
+YAMLS=("$REPO_ROOT"/registry-testnet-*.yaml)
 
 if (( ${#YAMLS[@]} == 0 )); then
   echo "no registry-turbo-*.yaml pipelines found in $REPO_ROOT" >&2
