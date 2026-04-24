@@ -5,7 +5,7 @@ job: false
 sources:
     goldsky_source:
         dataset_name: stellar_testnet.events
-        start_at: 2206305
+        start_at: 2209577
         type: dataset
         version: 1.2.0
 transforms:
@@ -62,7 +62,7 @@ transforms:
                 END AS registry_channel
             FROM transform_2_events_with_name_raw
             WHERE event_name = 'sub_reg'
-              AND emitter_contract_id = 'CAG5VYJR67TYA76FXPTQOGJXSO47CIUB7FNIG2KQ4VDMALGYZC65H5MW'
+              AND emitter_contract_id = 'CAAXJETKPYAATU4HVVQUTE2FFBULNFGZNEOC3MS635U5K3GZLAY2HI4M'
 
     registries_dynamic_table:
         type: dynamic_table
