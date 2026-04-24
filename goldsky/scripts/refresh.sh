@@ -9,7 +9,7 @@
 # emitter contract_id was added to the dynamic table only a few ledgers
 # earlier can be dropped by the check because the Postgres write hasn't
 # committed yet. See goldsky/v1/index.yaml transforms 3 and 4, as well as
-# comments in ./audit-race.sql
+# comments in ../v1/audit-race.sql
 #
 # `turbo restart --clear-state` clears pipeline state (source
 # checkpoints) but does not truncate the Postgres entity backing the

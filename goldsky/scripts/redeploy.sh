@@ -14,7 +14,7 @@
 #      deployment (root + its initial subregistries). Pass the value
 #      that matches the deployment being replayed.
 #   2. Sleep briefly to let any in-flight transform_5_* writes settle.
-#   3. Run goldsky/scripts/audit-race.sql. A non-empty result means
+#   3. Run goldsky/v1/audit-race.sql. A non-empty result means
 #      one or more events were dropped by the race between
 #      transform_3's Postgres write and transform_4's dynamic_table
 #      read (see that SQL file's header for the full explanation).
@@ -50,7 +50,6 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TURBO="$SCRIPT_DIR/turbo.sh"
 DROP="$SCRIPT_DIR/drop-tables.sh"
 REFRESH="$SCRIPT_DIR/refresh.sh"
-AUDIT_SQL="$SCRIPT_DIR/audit-race.sql"
 
 usage() {
   echo "usage: $0 [--number-of-initial-subregistries N] <pipeline-dir>" >&2
@@ -106,6 +105,7 @@ if [[ -n "$EXPECTED_SUBREGISTRIES" && ! "$EXPECTED_SUBREGISTRIES" =~ ^[0-9]+$ ]]
 fi
 
 PIPELINE_DIR="${PIPELINE_DIR%/}"
+AUDIT_SQL="$PIPELINE_DIR/audit-race.sql"
 
 if [[ ! -d "$PIPELINE_DIR" ]]; then
   echo "error: not a directory: $PIPELINE_DIR" >&2
