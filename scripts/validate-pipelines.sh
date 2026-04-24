@@ -5,16 +5,9 @@
 
 set -euo pipefail
 
-TURBO_BIN="${TURBO_BIN:-$HOME/.goldsky/bin/turbo}"
-
-if [[ ! -x "$TURBO_BIN" ]]; then
-  echo "turbo binary not found at $TURBO_BIN" >&2
-  echo "install with: curl -fsSL https://install-turbo.goldsky.com | bash" >&2
-  echo "or point TURBO_BIN at an existing binary" >&2
-  exit 1
-fi
-
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+TURBO="$SCRIPT_DIR/turbo.sh"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 shopt -s nullglob
 # Only validate the turbo pipelines. registry-minimal.yaml is an older
 # non-turbo definition and uses a different schema.
@@ -28,7 +21,7 @@ fi
 failures=0
 for yaml in "${YAMLS[@]}"; do
   echo "validating $(basename "$yaml")"
-  if ! "$TURBO_BIN" validate "$yaml"; then
+  if ! "$TURBO" validate "$yaml"; then
     echo "FAIL: $yaml" >&2
     failures=$((failures + 1))
   fi

@@ -6,6 +6,12 @@
 
 set -euo pipefail
 
+SKIP_CONFIRM=false
+if [[ "${1:-}" == "-y" || "${1:-}" == "--yes" ]]; then
+  SKIP_CONFIRM=true
+  shift
+fi
+
 if [[ -z "${DATABASE_URL:-}" ]]; then
   echo "error: DATABASE_URL is not set" >&2
   exit 1
@@ -42,10 +48,12 @@ for t in "${tables[@]}"; do
   echo "  - $t"
 done
 
-read -rp "proceed? [y/N] " confirm
-if [[ "$confirm" != [yY] ]]; then
-  echo "aborted"
-  exit 0
+if [[ "$SKIP_CONFIRM" != true ]]; then
+  read -rp "proceed? [y/N] " confirm
+  if [[ "$confirm" != [yY] ]]; then
+    echo "aborted"
+    exit 0
+  fi
 fi
 
 sql=""
