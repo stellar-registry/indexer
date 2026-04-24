@@ -8,7 +8,8 @@
 # Postgres-backed dynamic table from another transform. Events whose
 # emitter contract_id was added to the dynamic table only a few ledgers
 # earlier can be dropped by the check because the Postgres write hasn't
-# committed yet. See goldsky/v1/index.yaml transforms 3 and 4.
+# committed yet. See goldsky/v1/index.yaml transforms 3 and 4, as well as
+# comments in ./audit-race.sql
 #
 # `turbo restart --clear-state` clears pipeline state (source
 # checkpoints) but does not truncate the Postgres entity backing the
@@ -43,20 +44,7 @@ if [[ ! -f "$YAML_FILE" ]]; then
   exit 1
 fi
 
-PIPELINE_NAME=""
-while IFS= read -r line; do
-  if [[ "$line" =~ ^name:[[:space:]]+(.+)$ ]]; then
-    PIPELINE_NAME="${BASH_REMATCH[1]}"
-    break
-  fi
-done < "$YAML_FILE"
-
-if [[ -z "$PIPELINE_NAME" ]]; then
-  echo "error: could not find pipeline name in $YAML_FILE" >&2
-  exit 1
-fi
-
-echo "==> pipeline: $PIPELINE_NAME"
+echo "==> yaml file: $YAML_FILE"
 echo "==> restarting with --clear-state (source checkpoint reset, Postgres dynamic tables preserved)..."
-"$TURBO" restart "$PIPELINE_NAME" --clear-state
+"$TURBO" restart "$YAML_FILE" --clear-state
 echo "==> refresh complete"
