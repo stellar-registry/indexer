@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs `goldsky turbo validate` over every registry-*.yaml in the repo root.
+# Runs `goldsky turbo validate` over every goldsky/v*/index.yaml pipeline.
 # Requires the turbo CLI on PATH (install via https://goldsky.com/install).
 # `turbo validate` is an offline YAML schema check — no auth, no network.
 
@@ -7,14 +7,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TURBO="$SCRIPT_DIR/turbo.sh"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 shopt -s nullglob
-# Only validate the turbo pipelines. registry-minimal.yaml is an older
-# non-turbo definition and uses a different schema.
-YAMLS=("$REPO_ROOT"/registry-testnet-*.yaml)
+YAMLS=("$REPO_ROOT"/goldsky/v*/index.yaml)
 
 if (( ${#YAMLS[@]} == 0 )); then
-  echo "no registry-turbo-*.yaml pipelines found in $REPO_ROOT" >&2
+  echo "no goldsky/v*/index.yaml pipelines found in $REPO_ROOT" >&2
   exit 1
 fi
 

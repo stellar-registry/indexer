@@ -3,14 +3,14 @@
 # to work around the host GLIBC < 2.39 incompatibility.
 #
 # Usage:
-#   ./scripts/turbo.sh validate registry-testnet-v4.yaml
-#   ./scripts/turbo.sh apply registry-testnet-v4.yaml
-#   ./scripts/turbo.sh stop registry-testnet-v4
-#   ./scripts/turbo.sh list
+#   ./goldsky/scripts/turbo.sh validate goldsky/v1/index.yaml
+#   ./goldsky/scripts/turbo.sh apply goldsky/v1/index.yaml
+#   ./goldsky/scripts/turbo.sh stop registry-testnet-v1
+#   ./goldsky/scripts/turbo.sh list
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 GOLDSKY_DIR="${GOLDSKY_DIR:-$HOME/.goldsky}"
 HOST_TURBO="$GOLDSKY_DIR/bin/turbo"
 

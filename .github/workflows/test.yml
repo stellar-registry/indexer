@@ -35,4 +35,4 @@ jobs:
         if: env.GOLDSKY_API_KEY != ''
         env:
           GOLDSKY_API_KEY: ${{ secrets.GOLDSKY_API_KEY }}
-        run: bash scripts/validate-pipelines.sh
+        run: bash goldsky/scripts/validate-pipelines.sh

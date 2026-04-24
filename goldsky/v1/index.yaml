@@ -1,4 +1,4 @@
-name: registry-testnet-v4
+name: registry-testnet-v1
 resource_size: s
 use_dedicated_ip: false
 job: false
@@ -61,9 +61,9 @@ transforms:
     registries_dynamic_table:
         type: dynamic_table
         backend_type: Postgres
-        backend_entity_name: v4_registries_dynamic_table
+        backend_entity_name: registries_dynamic_table
         secret_name: HOSTED_POSTGRES_CMJD1KI8O0
-        schema: public
+        schema: v1
         sql: SELECT contract_id FROM transform_3_subregistry_events
 
     # joins to `registries_dynamic_table` to get only events emitted by official Registry and its subregistries
@@ -153,49 +153,49 @@ transforms:
 sinks:
     subregistry_events_pg:
         from: transform_3_subregistry_events
-        schema: public
+        schema: v1
         secret_name: HOSTED_POSTGRES_CMJD1KI8O0
-        table: v4_registries
+        table: registries
         type: postgres
     deploy_events_pg:
         from: transform_5_deploy_events
-        schema: public
+        schema: v1
         secret_name: HOSTED_POSTGRES_CMJD1KI8O0
-        table: v4_deployed_contracts
+        table: deployed_contracts
         type: postgres
     publish_events_pg:
         from: transform_5_publish_events
-        schema: public
+        schema: v1
         secret_name: HOSTED_POSTGRES_CMJD1KI8O0
-        table: v4_published_wasms
+        table: published_wasms
         type: postgres
     raw_events_backup:
         from: transform_1_events_raw
-        schema: public
+        schema: v1
         secret_name: HOSTED_POSTGRES_CMJD1KI8O0
-        table: v4_raw_events_backup
+        table: raw_events_backup
         type: postgres
     register_events_pg:
         from: transform_5_register_events
-        schema: public
+        schema: v1
         secret_name: HOSTED_POSTGRES_CMJD1KI8O0
-        table: v4_registered_contracts
+        table: registered_contracts
         type: postgres
     rename_events_pg:
         from: transform_5_rename
-        schema: public
+        schema: v1
         secret_name: HOSTED_POSTGRES_CMJD1KI8O0
-        table: v4_rename
+        table: rename
         type: postgres
     update_address_events_pg:
         from: transform_5_update_address
-        schema: public
+        schema: v1
         secret_name: HOSTED_POSTGRES_CMJD1KI8O0
-        table: v4_update_address
+        table: update_address
         type: postgres
     update_owner_events_pg:
         from: transform_5_update_owner
-        schema: public
+        schema: v1
         secret_name: HOSTED_POSTGRES_CMJD1KI8O0
-        table: v4_update_owner
+        table: update_owner
         type: postgres

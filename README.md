@@ -5,7 +5,7 @@ Both approaches use Goldsky to fetch initial data.
 Both approaches use AWS lambda to serve data to a client.
 
 ## Goldsky-first approach
-Goldsky-first approach uses `registrytest.yaml` configuration file as Goldsky pipeline configuration. 
+Goldsky-first approach uses `goldsky/v1/index.yaml` configuration file as Goldsky pipeline configuration. 
 It first filters all events that belong to registry contract, then stores raw events (as a backup data).
 Finally, deploy/publish event JSONs are being parsed via SQL transformer and pushed into Postgres.
 Note: if there are any migration or changes in the events schema, events would need to be re-processed 
