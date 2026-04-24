@@ -44,6 +44,8 @@ jobs:
     - name: Initialize database
       run: |
         PGPASSWORD=postgres psql -h localhost -U postgres -d postgres -f backup.sql
+      working-directory: ./fly-app
 
     - name: Run tests
       run: cargo test
+      working-directory: ./fly-app
