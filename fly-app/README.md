@@ -8,7 +8,7 @@ Postgres.
 2. `cargo test`
 
 ## Generating scenarios
-Requires Python 3.11+ (uses stdlib `tomllib`; no third-party deps, no Nix).
+Requires Python 3.11+ (uses stdlib `tomllib`; no third-party deps).
 1. Edit `scenarios_generator/scenarios.toml` to adjust endpoints and query params.
 2. Start the dev server pointed at local Postgres.
 3. Run `./bin/generate_scenarios.sh` and verify the regenerated
