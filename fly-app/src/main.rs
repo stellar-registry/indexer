@@ -308,7 +308,7 @@ async fn get_wasm_latest(
     let (channel, wasm_name) = path.into_inner();
     if channel != "main" && channel != "unverified" {
         return HttpResponse::BadRequest().json(ErrorResponse {
-            error: "Limit must be an integer between 2 and 200".into(),
+            error: "Channel must be one of: main, unverified".into(),
         });
     }
     fetch_wasm_detail(pool.get_ref(), &channel, &wasm_name, None).await
@@ -329,7 +329,7 @@ async fn get_wasm_version(
     let (channel, wasm_name, version) = path.into_inner();
     if channel != "main" && channel != "unverified" {
         return HttpResponse::BadRequest().json(ErrorResponse {
-            error: "Limit must be an integer between 2 and 200".into(),
+            error: "Channel must be one of: main, unverified".into(),
         });
     }
     fetch_wasm_detail(pool.get_ref(), &channel, &wasm_name, Some(&version)).await
@@ -411,7 +411,7 @@ async fn get_single_contract(
     let (channel, contract_name) = path.into_inner();
     if channel != "main" && channel != "unverified" {
         return HttpResponse::BadRequest().json(ErrorResponse {
-            error: "Limit must be an integer between 2 and 200".into(),
+            error: "Channel must be one of: main, unverified".into(),
         });
     }
     fetch_single_contract(&channel, &contract_name, pool).await
@@ -468,7 +468,7 @@ async fn get_contract_deploy_detail(
     let (channel, contract_name) = path.into_inner();
     if channel != "main" && channel != "unverified" {
         return HttpResponse::BadRequest().json(ErrorResponse {
-            error: "Limit must be an integer between 2 and 200".into(),
+            error: "Channel must be one of: main, unverified".into(),
         });
     }
     fetch_single_contract_detail(&channel, &contract_name, pool).await
@@ -573,6 +573,7 @@ async fn index_v1() -> HttpResponse {
             { "method": "GET", "path": "/v1/contracts", "description": "List all deployed contracts (main channel)" },
             { "method": "GET", "path": "/v1/contracts/{contract_name}", "description": "Get details for a deployed contract (main channel)" },
             { "method": "GET", "path": "/v1/contracts/{channel}/{contract_name}", "description": "Get details for a deployed contract for a specific channel. Supported channels: main, unverified" },
+            { "method": "GET", "path": "/v1/contract_deploy_details/{channel}/{contract_name}", "description": "Get deploy event operation body for a deployed contract. Supported channels: main, unverified" },
         ]
     }))
 }

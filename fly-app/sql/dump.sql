@@ -2,7 +2,6 @@
 -- PostgreSQL database dump
 --
 
-\restrict 77Nsc3x3JqI8QWB6rshhIiJNqcMyUFB8WZjKRlQ2yDlbhdQazEi9QGmJZu4HhT3
 
 -- Dumped from database version 17.8 (a48d9ca)
 -- Dumped by pg_dump version 18.3
@@ -427,22 +426,15 @@ ALTER TABLE ONLY public.v3_update_owner
 
 
 --
--- Name: DEFAULT PRIVILEGES FOR SEQUENCES; Type: DEFAULT ACL; Schema: public; Owner: cloud_admin
---
 
-ALTER DEFAULT PRIVILEGES FOR ROLE cloud_admin IN SCHEMA public GRANT ALL ON SEQUENCES TO neon_superuser WITH GRANT OPTION;
 
 
 --
--- Name: DEFAULT PRIVILEGES FOR TABLES; Type: DEFAULT ACL; Schema: public; Owner: cloud_admin
---
 
-ALTER DEFAULT PRIVILEGES FOR ROLE cloud_admin IN SCHEMA public GRANT ALL ON TABLES TO neon_superuser WITH GRANT OPTION;
 
 
 --
 -- PostgreSQL database dump complete
 --
 
-\unrestrict 77Nsc3x3JqI8QWB6rshhIiJNqcMyUFB8WZjKRlQ2yDlbhdQazEi9QGmJZu4HhT3
 

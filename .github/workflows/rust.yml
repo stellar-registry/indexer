@@ -15,8 +15,8 @@ jobs:
     runs-on: ubuntu-latest
 
     services:
-      # We can use the service container directly or run docker-compose
-      # Using docker-compose as requested to ensure it matches local setup
+      # CI uses a GitHub service container; local dev uses docker-compose.
+      # The seed scripts in fly-app/sql/ are applied manually by steps below.
       postgres:
         image: postgres:17-alpine
         env:

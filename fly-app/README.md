@@ -1,10 +1,15 @@
 ## Creating DB dump
-Run `./bin/create_db_dump.sh <full PG url with password>`  
+Run `./bin/create_db_dump.sh <full PG url with password>`. The script strips
+Neon-specific ACL directives so the output is replayable against a plain
+Postgres.
+
 ## Running tests
-1. run `docker-compose up -d` to start local PG database
+1. `docker-compose up -d` to start local Postgres seeded from `sql/`
 2. `cargo test`
+
 ## Generating scenarios
-To generate scenarios you need to have `nix` installed on your machine.
-After that, update `scenarios.yaml` to set endpoint and query parameters you want to test.  
-Start development server (connected to local postgres DB)
-Run `./generate_scenarios.sh` and verify scenario responses looks correct.
+Requires Python 3.11+ (uses stdlib `tomllib`; no third-party deps, no Nix).
+1. Edit `scenarios_generator/scenarios.toml` to adjust endpoints and query params.
+2. Start the dev server pointed at local Postgres.
+3. Run `./bin/generate_scenarios.sh` and verify the regenerated
+   `src/generated.rs` looks correct.

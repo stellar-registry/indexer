@@ -69,6 +69,11 @@ mod tests {
               "description": "Get details for a deployed contract for a specific channel. Supported channels: main, unverified",
               "method": "GET",
               "path": "/v1/contracts/{channel}/{contract_name}"
+            },
+            {
+              "description": "Get deploy event operation body for a deployed contract. Supported channels: main, unverified",
+              "method": "GET",
+              "path": "/v1/contract_deploy_details/{channel}/{contract_name}"
             }
           ],
           "name": "Registry Indexer API v1"

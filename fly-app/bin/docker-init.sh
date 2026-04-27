@@ -1,1 +1,0 @@
-PGPASSWORD=postgres psql -h localhost -U postgres -d postgres -f dump.sql
