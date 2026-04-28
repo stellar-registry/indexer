@@ -266,6 +266,69 @@ transforms:
             FROM transform_4_events_with_name
             WHERE event_name = 'update_owner'
         type: sql
+
+    # union of every contract_id deployed via or registered with a known registry
+    transform_tracked_contracts:
+        type: sql
+        primary_key: contract_id
+        sql: |-
+            SELECT contract_id FROM transform_5_deploy_events
+            UNION
+            SELECT contract_id FROM transform_5_register_events
+
+    tracked_contracts_dynamic_table:
+        type: dynamic_table
+        backend_type: Postgres
+        backend_entity_name: tracked_contracts_dynamic_table
+        secret_name: HOSTED_POSTGRES_CMJD1KI8O0
+        schema: v1
+        sql: SELECT contract_id FROM transform_tracked_contracts
+
+    # Soroban host emits a system event with topics
+    # [Symbol("executable_update"), <old ContractExecutable>, <new ContractExecutable>]
+    # whenever a contract calls update_current_contract_wasm. The emitter is the
+    # upgraded contract itself, so this branch lives outside transform_1_events_raw
+    # (which filters on contract-event topic symbols only).
+    transform_1_upgrade_events_raw:
+        primary_key: id
+        type: sql
+        sql: |-
+            SELECT *
+            FROM goldsky_source
+            WHERE type = 'system'
+              AND in_successful_contract_call = true
+              AND transaction_successful = true
+              AND id NOT LIKE '%-op-none-%'
+              AND JSON_VALUE(topics, '$[0].symbol') = 'executable_update'
+
+    # scope to upgrades of either a known registry or a contract we already track
+    transform_2_upgrade_events_scoped:
+        primary_key: id
+        type: sql
+        sql: |-
+            SELECT *
+            FROM transform_1_upgrade_events_raw
+            WHERE dynamic_table_check('registries_dynamic_table', contract_id)
+               OR dynamic_table_check('tracked_contracts_dynamic_table', contract_id)
+
+    # ContractExecutable serializes as a tagged vec: [Symbol(variant), Bytes(hash)?]
+    # variant is "Wasm" (with hash) or "StellarAsset" (no hash). Verify the JSON
+    # path against a real upgrade event in raw_events_backup before trusting this.
+    transform_3_upgrade_events:
+        primary_key: id
+        type: sql
+        sql: |-
+            SELECT
+              id,
+              transaction_hash,
+              ledger_sequence,
+              ledger_closed_at AS created_at,
+              contract_id AS upgraded_contract_id,
+              JSON_VALUE(topics, '$[1].vec[0].symbol') AS old_executable_kind,
+              JSON_VALUE(topics, '$[1].vec[1].bytes') AS old_wasm_hash,
+              JSON_VALUE(topics, '$[2].vec[0].symbol') AS new_executable_kind,
+              JSON_VALUE(topics, '$[2].vec[1].bytes') AS new_wasm_hash
+            FROM transform_2_upgrade_events_scoped
 sinks:
     subregistry_events_pg:
         from: transform_3_subregistry_events
@@ -314,4 +377,10 @@ sinks:
         schema: v1
         secret_name: HOSTED_POSTGRES_CMJD1KI8O0
         table: update_owner
+        type: postgres
+    upgrade_events_pg:
+        from: transform_3_upgrade_events
+        schema: v1
+        secret_name: HOSTED_POSTGRES_CMJD1KI8O0
+        table: contract_upgrades
         type: postgres
