@@ -125,6 +125,33 @@ struct ContractDetail {
     wasm_channel: Option<String>,
     #[serde(rename = "is_stellar_asset_contract")]
     sac: Option<bool>,
+    initial_wasm_hash: Option<String>,
+}
+
+/// Row mapping for v1.contract_upgrades. Each row is one host-emitted
+/// `executable_update` system event for a contract that's tracked by a
+/// registry (root + sub-registries) or registered with one.
+#[derive(sqlx::FromRow, Serialize, Clone)]
+struct ContractUpgrade {
+    id: String,
+    transaction_hash: String,
+    ledger_sequence: i64,
+    created_at: chrono::NaiveDateTime,
+    upgraded_contract_id: String,
+    old_executable_kind: Option<String>,
+    old_wasm_hash: Option<String>,
+    new_executable_kind: Option<String>,
+    new_wasm_hash: Option<String>,
+}
+
+/// Wraps ContractDetail with the wasm-history fields. Flattened so the JSON
+/// shape stays a single object.
+#[derive(Serialize)]
+struct ContractDetailResponse {
+    #[serde(flatten)]
+    detail: ContractDetail,
+    current_wasm_hash: Option<String>,
+    wasm_upgrades: Vec<ContractUpgrade>,
 }
 
 /// From Table "v1.registries"
@@ -447,6 +474,7 @@ async fn fetch_single_contract(
                 registered.contract_name,
                 registered.channel,
                 registered.sac,
+                registered.wasm_hash AS initial_wasm_hash,
                 deployed.deployer,
                 wasms.wasm_version,
                 wasms.wasm_name,
@@ -476,10 +504,127 @@ async fn fetch_single_contract(
     .fetch_optional(pool.get_ref())
     .await;
 
-    match row {
-        Ok(Some(r)) => HttpResponse::Ok().json(r),
-        Ok(None) => HttpResponse::NotFound().json(ErrorResponse {
-            error: format!("Contract '{contract_name}' not found"),
+    let detail = match row {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            return HttpResponse::NotFound().json(ErrorResponse {
+                error: format!("Contract '{contract_name}' not found"),
+            });
+        }
+        Err(e) => {
+            eprintln!("Database error: {e}");
+            return HttpResponse::InternalServerError().json(ErrorResponse {
+                error: "Internal server error".into(),
+            });
+        }
+    };
+
+    let Some(contract_id) = detail.contract_id.clone() else {
+        return HttpResponse::Ok().json(ContractDetailResponse {
+            current_wasm_hash: detail.initial_wasm_hash.clone(),
+            wasm_upgrades: vec![],
+            detail,
+        });
+    };
+
+    let upgrades = match fetch_upgrades_for_contract_id(&contract_id, pool.get_ref()).await {
+        Ok(rows) => rows,
+        Err(e) => {
+            eprintln!("Database error: {e}");
+            return HttpResponse::InternalServerError().json(ErrorResponse {
+                error: "Internal server error".into(),
+            });
+        }
+    };
+
+    let current_wasm_hash = upgrades
+        .last()
+        .and_then(|u| u.new_wasm_hash.clone())
+        .or_else(|| detail.initial_wasm_hash.clone());
+
+    HttpResponse::Ok().json(ContractDetailResponse {
+        detail,
+        current_wasm_hash,
+        wasm_upgrades: upgrades,
+    })
+}
+
+async fn fetch_upgrades_for_contract_id(
+    contract_id: &str,
+    pool: &PgPool,
+) -> Result<Vec<ContractUpgrade>, sqlx::Error> {
+    sqlx::query_as::<_, ContractUpgrade>(
+        "SELECT
+                id,
+                transaction_hash,
+                ledger_sequence,
+                created_at,
+                upgraded_contract_id,
+                old_executable_kind,
+                old_wasm_hash,
+                new_executable_kind,
+                new_wasm_hash
+            FROM v1.contract_upgrades
+            WHERE upgraded_contract_id = $1
+            ORDER BY ledger_sequence ASC",
+    )
+    .bind(contract_id)
+    .fetch_all(pool)
+    .await
+}
+
+async fn get_contract_upgrades_root(
+    pool: web::Data<PgPool>,
+    path: web::Path<String>,
+) -> HttpResponse {
+    let contract_name = path.into_inner();
+    fetch_contract_upgrades("root", &contract_name, pool).await
+}
+
+async fn get_contract_upgrades(
+    pool: web::Data<PgPool>,
+    path: web::Path<(String, String)>,
+) -> HttpResponse {
+    let (channel, contract_name) = path.into_inner();
+    fetch_contract_upgrades(&channel, &contract_name, pool).await
+}
+
+async fn fetch_contract_upgrades(
+    channel: &str,
+    contract_name: &str,
+    pool: web::Data<PgPool>,
+) -> HttpResponse {
+    let rows = sqlx::query_as::<_, ContractUpgrade>(
+        "SELECT
+                u.id,
+                u.transaction_hash,
+                u.ledger_sequence,
+                u.created_at,
+                u.upgraded_contract_id,
+                u.old_executable_kind,
+                u.old_wasm_hash,
+                u.new_executable_kind,
+                u.new_wasm_hash
+            FROM v1.contract_upgrades u
+            WHERE u.upgraded_contract_id = (
+                SELECT registered.contract_id
+                FROM v1.registered_contracts_with_channel registered
+                WHERE registered.contract_name = $1
+                  AND registered.channel = $2
+                ORDER BY registered.ledger_sequence DESC
+                LIMIT 1
+            )
+            ORDER BY u.ledger_sequence ASC",
+    )
+    .bind(contract_name)
+    .bind(channel)
+    .fetch_all(pool.get_ref())
+    .await;
+
+    match rows {
+        Ok(rows) => HttpResponse::Ok().json(ListResponse::<ContractUpgrade> {
+            result: rows,
+            next: None,
         }),
         Err(e) => {
             eprintln!("Database error: {e}");
@@ -601,8 +746,10 @@ async fn index_v1() -> HttpResponse {
             { "method": "GET", "path": "/v1/wasms/{wasm_name}/v/{version}", "description": "Get a specific version of a wasm (main channel)" },
             { "method": "GET", "path": "/v1/wasms/{channel}/{wasm_name}/v/{version}", "description": "Get a specific version of a wasm for a specific channel. Supported channels: main, unverified" },
             { "method": "GET", "path": "/v1/contracts", "description": "List all deployed contracts (main channel)" },
-            { "method": "GET", "path": "/v1/contracts/{contract_name}", "description": "Get details for a deployed contract (main channel)" },
-            { "method": "GET", "path": "/v1/contracts/{channel}/{contract_name}", "description": "Get details for a deployed contract for a specific channel." },
+            { "method": "GET", "path": "/v1/contracts/{contract_name}", "description": "Get details for a deployed contract (main channel), including current_wasm_hash and wasm_upgrades history" },
+            { "method": "GET", "path": "/v1/contracts/{channel}/{contract_name}", "description": "Get details for a deployed contract for a specific channel, including current_wasm_hash and wasm_upgrades history" },
+            { "method": "GET", "path": "/v1/contracts/{contract_name}/upgrades", "description": "List wasm upgrade events for a contract (main channel)" },
+            { "method": "GET", "path": "/v1/contracts/{channel}/{contract_name}/upgrades", "description": "List wasm upgrade events for a contract on a specific channel" },
             { "method": "GET", "path": "/v1/registries", "description": "List all known sub-registries announced by the root registry." },
         ]
     }))
@@ -677,16 +824,24 @@ async fn main() -> std::io::Result<()> {
             .route("/v1/registries", web::get().to(get_registries))
             .route("/v1/contracts", web::get().to(get_contracts_root))
             .route(
+                "/v1/contracts/{contract_name}/upgrades",
+                web::get().to(get_contract_upgrades_root),
+            )
+            .route(
+                "/v1/contracts/{channel}/{contract_name}/upgrades",
+                web::get().to(get_contract_upgrades),
+            )
+            .route(
+                "/v1/contract_deploy_details/{channel}/{contract_name}",
+                web::get().to(get_contract_deploy_detail),
+            )
+            .route(
                 "/v1/contracts/{contract_name}",
                 web::get().to(get_single_contract_root),
             )
             .route(
                 "/v1/contracts/{channel}/{contract_name}",
                 web::get().to(get_single_contract),
-            )
-            .route(
-                "/v1/contract_deploy_details/{channel}/{contract_name}",
-                web::get().to(get_contract_deploy_detail),
             )
             .route("/health", web::get().to(health))
     })
