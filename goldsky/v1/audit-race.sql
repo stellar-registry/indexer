@@ -3,17 +3,17 @@
 --
 -- Why this exists
 -- ---------------
--- `transform_4_events_with_name` in goldsky/v1/index.yaml filters the
+-- `transform_3_events_with_name` in goldsky/v1/index.yaml filters the
 -- event stream through `dynamic_table_check('registries_dynamic_table',
 -- emitter_contract_id)`. The dynamic table is populated by a sibling
--- transform (`transform_3_subregistry_events`) whose writes land in a
+-- transform (`transform_2_subregistry_events`) whose writes land in a
 -- Postgres-backed entity (`v1.registries_dynamic_table`). The check
--- runs on every event going through transform_4 and reads from the
+-- runs on every event going through transform_3 and reads from the
 -- same Postgres entity.
 --
 -- These two paths are not synchronized. When an event's emitter
 -- contract_id was `sub_reg`'d only a few ledgers earlier, the Postgres
--- write from transform_3 may not have committed by the time the check
+-- write from transform_2 may not have committed by the time the check
 -- reads, so the event gets filtered out even though it legitimately
 -- belongs. Observed race window: at least 10 s (2 ledgers) — safe at
 -- ~70 s (14 ledgers).
@@ -53,7 +53,7 @@
 --
 -- Usage
 -- -----
---   psql "$DATABASE_URL" -f goldsky/scripts/audit-race.sql
+--   psql "$DATABASE_URL" -f goldsky/v1/audit-race.sql
 --
 -- A result set of zero rows means no race-dropped events were found.
 
@@ -62,10 +62,10 @@ WITH raw AS (
     r.id,
     r.transaction_hash,
     r.ledger_sequence,
-    r.contract_id AS emitter_contract_id,
-    JSON_EXTRACT_PATH_TEXT(r.topics::json->0, 'symbol') AS event_name
+    r.emitter_contract_id,
+    r.event_name
   FROM v1.raw_events_backup r
-  JOIN v1.registries g ON g.contract_id = r.contract_id
+  JOIN v1.registries g ON g.contract_id = r.emitter_contract_id
 )
 SELECT
   raw.event_name,

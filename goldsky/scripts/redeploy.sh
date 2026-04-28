@@ -172,7 +172,15 @@ echo "==> applying pipeline..."
 "$TURBO" apply "$YAML_FILE"
 echo ""
 
-# 5. Apply post_init.sql (if present), retrying until Goldsky has
+# 5. Restart with --clear-state so the source checkpoint rewinds to
+#    start_at and replays the full history into the freshly-dropped
+#    sink tables. Without --clear-state the pipeline would resume from
+#    its last checkpoint and only repopulate events going forward.
+echo "==> restarting pipeline (--clear-state)..."
+"$TURBO" restart --clear-state "$PIPELINE_NAME"
+echo ""
+
+# 6. Apply post_init.sql (if present), retrying until Goldsky has
 #    created the sink tables the script depends on. Any psql error
 #    (e.g. "relation ... does not exist") triggers a retry. psql
 #    stderr is suppressed on non-final attempts so the expected
@@ -204,7 +212,7 @@ if [[ -f "$POST_INIT_SQL" ]]; then
   echo ""
 fi
 
-# 6. Race-condition verification and recovery. Only runs when the caller
+# 7. Race-condition verification and recovery. Only runs when the caller
 #    supplied the expected count of initial subregistries, because the
 #    audit needs a definition of "the dynamic table is fully seeded"
 #    before it's meaningful to check for drops.
@@ -238,21 +246,23 @@ if [[ -n "$EXPECTED_SUBREGISTRIES" ]]; then
   sleep "$settle_delay"
   echo ""
 
-  # tuples-only, unaligned, quiet -> one row per output line, so
-  # `wc -l` on a non-empty result gives the drop count exactly.
-  audit_count() {
+  # Run the race audit once and return the dropped row count via stdout.
+  # Any non-empty dropped-row payload is echoed to stderr so the failure
+  # detail lands in the log without polluting the captured count.
+  # tuples-only, unaligned, quiet -> one row per output line.
+  audit_run() {
     local rows
     rows=$(psql "$DATABASE_URL" -tAq -f "$AUDIT_SQL")
     if [[ -z "$rows" ]]; then
       echo 0
     else
+      printf '%s\n' "$rows" >&2
       printf '%s\n' "$rows" | wc -l
     fi
   }
 
   echo "==> running race audit: $AUDIT_SQL"
-  psql "$DATABASE_URL" -f "$AUDIT_SQL"
-  dropped=$(audit_count)
+  dropped=$(audit_run)
 
   if (( dropped == 0 )); then
     echo "==> no race drops detected — redeploy complete"
@@ -269,8 +279,7 @@ if [[ -n "$EXPECTED_SUBREGISTRIES" ]]; then
   echo ""
 
   echo "==> re-running race audit after refresh..."
-  psql "$DATABASE_URL" -f "$AUDIT_SQL"
-  dropped_after=$(audit_count)
+  dropped_after=$(audit_run)
 
   if (( dropped_after > 0 )); then
     echo "error: $dropped_after events still missing after refresh — manual investigation needed" >&2
