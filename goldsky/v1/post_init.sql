@@ -22,19 +22,3 @@ SELECT
   r.registry_channel AS channel
 FROM v1.registered_contracts c
 JOIN v1.registries r ON r.contract_id = c.emitter_contract_id;
-
--- Scopes v1.contract_upgrades to upgrades of contracts we care about:
--- registries themselves, contracts deployed via a registry, and contracts
--- registered with one. The pipeline sinks every network upgrade event
--- because Goldsky only allows one dynamic_table_check consumer per dynamic
--- table; this view does the scoping in Postgres at query time.
-CREATE OR REPLACE VIEW v1.contract_upgrades_scoped AS
-SELECT u.*
-FROM v1.contract_upgrades u
-WHERE u.upgraded_contract_id IN (
-  SELECT contract_id FROM v1.registries
-  UNION
-  SELECT contract_id FROM v1.deployed_contracts
-  UNION
-  SELECT contract_id FROM v1.registered_contracts
-);

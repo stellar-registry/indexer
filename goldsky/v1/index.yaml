@@ -12,7 +12,15 @@ transforms:
     transform_1_events_raw:
         primary_key: id
         sql: |-
-            SELECT *
+            SELECT
+              id,
+              transaction_hash,
+              ledger_sequence,
+              ledger_closed_at as created_at,
+              JSON_VALUE(topics, '$[0].symbol') as event_name,
+              contract_id as emitter_contract_id,
+              data,
+              topics
             FROM goldsky_source
             WHERE in_successful_contract_call = true
               AND transaction_successful = true
@@ -27,23 +35,9 @@ transforms:
                     'sub_reg'
                   )
         type: sql
-    transform_2_events_with_name_raw:
-        primary_key: id
-        sql: |-
-            SELECT
-              id,
-              transaction_hash,
-              ledger_sequence,
-              ledger_closed_at as created_at,
-              JSON_VALUE(topics, '$[0].symbol') as event_name,
-              contract_id as emitter_contract_id,
-              data,
-              topics
-            FROM transform_1_events_raw
-        type: sql
 
     # getting only `sub_reg` events fired by the root registry
-    transform_3_subregistry_events:
+    transform_2_subregistry_events:
         type: sql
         primary_key: contract_id
         sql: |-
@@ -60,7 +54,7 @@ transforms:
                     WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'name' THEN JSON_VALUE(data, '$.map[0].val.string')
                     WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'name' THEN JSON_VALUE(data, '$.map[1].val.string')
                 END AS registry_channel
-            FROM transform_2_events_with_name_raw
+            FROM transform_1_events_raw
             WHERE event_name = 'sub_reg'
               AND emitter_contract_id = 'CAAXJETKPYAATU4HVVQUTE2FFBULNFGZNEOC3MS635U5K3GZLAY2HI4M'
 
@@ -70,18 +64,18 @@ transforms:
         backend_entity_name: registries_dynamic_table
         secret_name: HOSTED_POSTGRES_CMJD1KI8O0
         schema: v1
-        sql: SELECT contract_id FROM transform_3_subregistry_events
+        sql: SELECT contract_id FROM transform_2_subregistry_events
 
     # joins to `registries_dynamic_table` to get only events emitted by official Registry and its subregistries
-    transform_4_events_with_name:
+    transform_3_events_with_name:
         type: sql
         primary_key: id
         sql: |-
             SELECT *
-            FROM transform_2_events_with_name_raw
+            FROM transform_1_events_raw
             WHERE dynamic_table_check('registries_dynamic_table', emitter_contract_id)
 
-    transform_5_deploy_events:
+    transform_4_deploy_events:
         type: sql
         primary_key: id
         sql: |-
@@ -136,9 +130,9 @@ transforms:
                   WHEN JSON_VALUE(data, '$.map[3].key.symbol') = 'registry' THEN JSON_VALUE(data, '$.map[3].val.address')
                   WHEN JSON_VALUE(data, '$.map[4].key.symbol') = 'registry' THEN JSON_VALUE(data, '$.map[4].val.address')
               END AS registry_contract_id
-            FROM transform_4_events_with_name
+            FROM transform_3_events_with_name
             WHERE event_name = 'deploy'
-    transform_5_publish_events:
+    transform_4_publish_events:
         primary_key: id
         sql: |-
             SELECT
@@ -179,10 +173,10 @@ transforms:
                 WHEN JSON_VALUE(data, '$.map[2].key.symbol') = 'wasm_name' THEN JSON_VALUE(data, '$.map[2].val.string')
                 WHEN JSON_VALUE(data, '$.map[3].key.symbol') = 'wasm_name' THEN JSON_VALUE(data, '$.map[3].val.string')
               END AS wasm_name
-            FROM transform_4_events_with_name
+            FROM transform_3_events_with_name
             WHERE event_name = 'publish'
         type: sql
-    transform_5_register_events:
+    transform_4_register_events:
         primary_key: id
         sql: |-
             SELECT
@@ -208,17 +202,17 @@ transforms:
                     WHEN JSON_VALUE(data, '$.map[2].key.symbol') = 'sac' THEN CAST(JSON_VALUE(data, '$.map[2].val.bool') AS BOOLEAN)
                     WHEN JSON_VALUE(data, '$.map[3].key.symbol') = 'sac' THEN CAST(JSON_VALUE(data, '$.map[3].val.bool') AS BOOLEAN)
                 END AS sac,
-                -- wasm_hash (bytes/hex)
+                -- initial_wasm_hash (bytes/hex)
                 CASE
                     WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'wasm_hash' THEN JSON_VALUE(data, '$.map[0].val.bytes')
                     WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'wasm_hash' THEN JSON_VALUE(data, '$.map[1].val.bytes')
                     WHEN JSON_VALUE(data, '$.map[2].key.symbol') = 'wasm_hash' THEN JSON_VALUE(data, '$.map[2].val.bytes')
                     WHEN JSON_VALUE(data, '$.map[3].key.symbol') = 'wasm_hash' THEN JSON_VALUE(data, '$.map[3].val.bytes')
-                END AS wasm_hash
-            FROM transform_4_events_with_name
+                END AS initial_wasm_hash
+            FROM transform_3_events_with_name
             WHERE event_name = 'register'
         type: sql
-    transform_5_rename:
+    transform_4_rename:
         primary_key: id
         sql: |-
             SELECT
@@ -231,10 +225,10 @@ transforms:
                     WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'new_name' THEN JSON_VALUE(data, '$.map[0].val.string')
                     WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'new_name' THEN JSON_VALUE(data, '$.map[1].val.string')
                 END AS new_name
-            FROM transform_4_events_with_name
+            FROM transform_3_events_with_name
             WHERE event_name = 'rename'
         type: sql
-    transform_5_update_address:
+    transform_4_update_address:
         primary_key: id
         sql: |-
             SELECT
@@ -247,10 +241,10 @@ transforms:
                     WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'new_address' THEN JSON_VALUE(data, '$.map[0].val.address')
                     WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'new_address' THEN JSON_VALUE(data, '$.map[1].val.address')
                 END AS new_address
-            FROM transform_4_events_with_name
+            FROM transform_3_events_with_name
             WHERE event_name = 'update_address'
         type: sql
-    transform_5_update_owner:
+    transform_4_update_owner:
         primary_key: id
         sql: |-
             SELECT
@@ -263,28 +257,16 @@ transforms:
                     WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'new_owner' THEN JSON_VALUE(data, '$.map[0].val.address')
                     WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'new_owner' THEN JSON_VALUE(data, '$.map[1].val.address')
                 END AS new_owner
-            FROM transform_4_events_with_name
+            FROM transform_3_events_with_name
             WHERE event_name = 'update_owner'
         type: sql
 
-    transform_1_upgrade_events_raw:
-        primary_key: id
-        type: sql
-        sql: |-
-            SELECT *
-            FROM goldsky_source
-            WHERE `type` = 'system'
-              AND in_successful_contract_call = true
-              AND transaction_successful = true
-              AND id NOT LIKE '%-op-none-%'
-              AND JSON_VALUE(topics, '$[0].symbol') = 'executable_update'
-
     # No dynamic_table_check: Goldsky's validator only allows one
     # dynamic_table_check consumer per dynamic table, and registries_dynamic_table
-    # is already consumed by transform_4_events_with_name. We capture every
+    # is already consumed by transform_3_events_with_name. We capture every
     # network upgrade event here and scope at query time via a Postgres view
     # that joins to registries + deployed_contracts + registered_contracts.
-    transform_2_upgrade_events:
+    transform_1_upgrade_events_raw:
         primary_key: id
         type: sql
         sql: |-
@@ -298,22 +280,28 @@ transforms:
               JSON_VALUE(topics, '$[1].vec[1].bytes') AS old_wasm_hash,
               JSON_VALUE(topics, '$[2].vec[0].symbol') AS new_executable_kind,
               JSON_VALUE(topics, '$[2].vec[1].bytes') AS new_wasm_hash
-            FROM transform_1_upgrade_events_raw
+            FROM goldsky_source
+            WHERE `type` = 'system'
+              AND in_successful_contract_call = true
+              AND transaction_successful = true
+              AND id NOT LIKE '%-op-none-%'
+              AND JSON_VALUE(topics, '$[0].symbol') = 'executable_update'
+
 sinks:
     subregistry_events_pg:
-        from: transform_3_subregistry_events
+        from: transform_2_subregistry_events
         schema: v1
         secret_name: HOSTED_POSTGRES_CMJD1KI8O0
         table: registries
         type: postgres
     deploy_events_pg:
-        from: transform_5_deploy_events
+        from: transform_4_deploy_events
         schema: v1
         secret_name: HOSTED_POSTGRES_CMJD1KI8O0
         table: deployed_contracts
         type: postgres
     publish_events_pg:
-        from: transform_5_publish_events
+        from: transform_4_publish_events
         schema: v1
         secret_name: HOSTED_POSTGRES_CMJD1KI8O0
         table: published_wasms
@@ -325,31 +313,31 @@ sinks:
         table: raw_events_backup
         type: postgres
     register_events_pg:
-        from: transform_5_register_events
+        from: transform_4_register_events
         schema: v1
         secret_name: HOSTED_POSTGRES_CMJD1KI8O0
         table: registered_contracts
         type: postgres
     rename_events_pg:
-        from: transform_5_rename
+        from: transform_4_rename
         schema: v1
         secret_name: HOSTED_POSTGRES_CMJD1KI8O0
         table: rename
         type: postgres
     update_address_events_pg:
-        from: transform_5_update_address
+        from: transform_4_update_address
         schema: v1
         secret_name: HOSTED_POSTGRES_CMJD1KI8O0
         table: update_address
         type: postgres
     update_owner_events_pg:
-        from: transform_5_update_owner
+        from: transform_4_update_owner
         schema: v1
         secret_name: HOSTED_POSTGRES_CMJD1KI8O0
         table: update_owner
         type: postgres
     upgrade_events_pg:
-        from: transform_2_upgrade_events
+        from: transform_1_upgrade_events_raw
         schema: v1
         secret_name: HOSTED_POSTGRES_CMJD1KI8O0
         table: contract_upgrades
