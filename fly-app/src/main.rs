@@ -555,14 +555,8 @@ async fn fetch_upgrades_for_contract_id(
 ) -> Result<Vec<ContractUpgrade>, sqlx::Error> {
     sqlx::query_as::<_, ContractUpgrade>(
         "SELECT
-                id,
-                transaction_hash,
-                ledger_sequence,
                 created_at,
-                upgraded_contract_id,
-                old_executable_kind,
                 old_wasm_hash,
-                new_executable_kind,
                 new_wasm_hash
             FROM v1.contract_upgrades
             WHERE upgraded_contract_id = $1
