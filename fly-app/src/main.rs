@@ -403,7 +403,7 @@ async fn get_contracts_root(
                 SELECT DISTINCT ON (wasm_hash) wasm_hash, wasm_version, wasm_name
                 FROM v1.published_wasms
                 ORDER BY wasm_hash, ledger_sequence DESC
-            ) wasms ON wasms.wasm_hash = registered.wasm_hash
+            ) wasms ON wasms.wasm_hash = registered.initial_wasm_hash
             LEFT JOIN (
                 SELECT DISTINCT ON (contract_id) contract_id, deployer, registry_contract_id
                 FROM v1.deployed_contracts
@@ -484,7 +484,7 @@ async fn fetch_single_contract(
                 SELECT DISTINCT ON (wasm_hash) wasm_hash, wasm_version, wasm_name
                 FROM v1.published_wasms
                 ORDER BY wasm_hash, ledger_sequence DESC
-            ) wasms ON wasms.wasm_hash = registered.wasm_hash
+            ) wasms ON wasms.wasm_hash = registered.initial_wasm_hash
             LEFT JOIN (
                 SELECT DISTINCT ON (contract_id) contract_id, deployer, registry_contract_id
                 FROM v1.deployed_contracts
