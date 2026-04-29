@@ -1,7 +1,7 @@
 use actix_web::{web, App, HttpResponse, HttpServer};
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgPoolOptions;
-use sqlx::{Execute, PgPool};
+use sqlx::PgPool;
 
 #[derive(Deserialize)]
 struct QueryParams {
@@ -30,7 +30,7 @@ struct WasmVersionResult {
     wasm_hash: Option<String>,
 }
 
-/// DB row mapping for v3_published_wasms
+/// DB row mapping for v1.published_wasms
 ///
 /// ```
 /// Column      |            Type             | Collation | Nullable | Default
@@ -77,53 +77,71 @@ struct ContractResult {
     deployer: Option<String>,
     wasm_version: Option<String>,
     wasm_name: Option<String>,
+    wasm_channel: Option<String>,
     #[serde(rename = "is_stellar_asset_contract")]
     sac: Option<bool>,
 }
 
 /// Full detail for /contracts/{contract_name} endpoint
 ///
-/// From table "v3_deployed_contracts":
+/// From Table "v1.deployed_contracts"
+///       Column         |            Type             | Collation | Nullable | Default
+///----------------------+-----------------------------+-----------+----------+---------
+/// id                   | text                        |           | not null |
+/// transaction_hash     | text                        |           |          |
+/// ledger_sequence      | bigint                      |           |          |
+/// created_at           | timestamp without time zone |           |          |
+/// emitter_contract_id  | text                        |           |          |
+/// wasm_name            | text                        |           |          |
+/// wasm_version         | text                        |           |          |
+/// deployer             | text                        |           |          |
+/// contract_id          | text                        |           |          |
+/// registry_contract_id | text                        |           |          |
 ///
-/// ```
-/// Column      |            Type             | Collation | Nullable | Default
-/// ------------------+-----------------------------+-----------+----------+---------
-/// id               | text                        |           | not null |
-/// transaction_hash | text                        |           | not null |
-/// ledger_sequence  | bigint                      |           | not null |
-/// created_at       | timestamp without time zone |           | not null |
-/// channel    | text                        |           |          |
-/// wasm_name        | text                        |           |          |
-/// wasm_version     | text                        |           |          |
-/// deployer         | text                        |           |          |
-/// contract_id      | text                        |           |          |
-/// ```
-/// And table `v3_registered_contracts`
-/// ```
-///       Column      |            Type             | Collation | Nullable | Default
-/// ------------------+-----------------------------+-----------+----------+---------
-///  id               | text                        |           | not null |
-///  transaction_hash | text                        |           | not null |
-///  ledger_sequence  | bigint                      |           | not null |
-///  created_at       | timestamp without time zone |           | not null |
-///  channel    | text                        |           |          |
-///  contract_name    | text                        |           |          |
-///  contract_id      | text                        |           |          |
-/// ```
+/// ...and Table "v1.registered_contracts"
+///       Column        |            Type             | Collation | Nullable | Default
+///---------------------+-----------------------------+-----------+----------+---------
+/// id                  | text                        |           | not null |
+/// transaction_hash    | text                        |           |          |
+/// ledger_sequence     | bigint                      |           |          |
+/// created_at          | timestamp without time zone |           |          |
+/// emitter_contract_id | text                        |           |          |
+/// contract_name       | text                        |           |          |
+/// contract_id         | text                        |           |          |
+/// sac                 | boolean                     |           |          |
+/// wasm_hash           | text                        |           |          |
 #[derive(sqlx::FromRow, Serialize)]
 struct ContractDetail {
     id: String,
     transaction_hash: String,
     ledger_sequence: i64,
     created_at: chrono::NaiveDateTime,
-    channel: Option<String>,
     contract_id: Option<String>,
     contract_name: Option<String>,
+    channel: Option<String>,
     deployer: Option<String>,
     wasm_version: Option<String>,
     wasm_name: Option<String>,
+    wasm_channel: Option<String>,
     #[serde(rename = "is_stellar_asset_contract")]
     sac: Option<bool>,
+}
+
+/// From Table "v1.registries"
+///      Column      |            Type             | Collation | Nullable | Default
+///------------------+-----------------------------+-----------+----------+---------
+/// id               | text                        |           |          |
+/// transaction_hash | text                        |           |          |
+/// ledger_sequence  | bigint                      |           |          |
+/// created_at       | timestamp without time zone |           |          |
+/// contract_id      | text                        |           | not null |
+/// registry_channel | text                        |           |          |
+#[derive(sqlx::FromRow, Serialize)]
+struct Registry {
+    contract_id: String,
+    channel: String,
+    ledger_sequence: i64,
+    created_at: chrono::NaiveDateTime,
 }
 
 #[derive(sqlx::FromRow, Serialize)]
@@ -140,8 +158,8 @@ pub fn serialize_raw<S: serde::Serializer>(val: &Option<String>, s: S) -> Result
     match val {
         None => s.serialize_none(),
         Some(raw) => {
-            let v: serde_json::Value = serde_json::from_str(raw)
-                .map_err(serde::ser::Error::custom)?;
+            let v: serde_json::Value =
+                serde_json::from_str(raw).map_err(serde::ser::Error::custom)?;
             v.serialize(s)
         }
     }
@@ -179,10 +197,12 @@ async fn get_wasms(pool: web::Data<PgPool>, query: web::Query<QueryParams>) -> H
     // With adding an extra 'z' symbol to ensure string is lexicographically greater
     // to go to the next transaction in the same ledger (if any)
     let rows = sqlx::query_as::<_, WasmResult>(
-        "SELECT id, author, wasm_version, wasm_name, wasm_hash, channel FROM \
+        "SELECT sub.id, sub.author, sub.wasm_version, sub.wasm_name, sub.wasm_hash, \
+                sub.channel \
+         FROM \
            (SELECT *, ROW_NUMBER() OVER \
              (PARTITION BY wasm_name ORDER BY ledger_sequence DESC, wasm_version DESC) AS rn \
-             FROM public.v3_published_wasms \
+             FROM v1.published_wasms_with_channel \
            ) AS sub \
          WHERE rn = 1 AND (ledger_sequence, id) >= ($1, $2) \
          ORDER BY ledger_sequence, id ASC \
@@ -223,8 +243,9 @@ async fn fetch_wasm_detail(
         sqlx::query_as::<_, WasmDetailRow>(
             "SELECT id, transaction_hash, ledger_sequence, created_at, \
                     author, wasm_version, wasm_name, wasm_hash, channel \
-             FROM public.v3_published_wasms \
-             WHERE wasm_name = $1 AND wasm_version = $2 AND channel = $3",
+             FROM v1.published_wasms_with_channel \
+             WHERE wasm_name = $1 AND wasm_version = $2 \
+               AND channel = $3",
         )
         .bind(wasm_name)
         .bind(ver)
@@ -233,13 +254,15 @@ async fn fetch_wasm_detail(
         .await
     } else {
         sqlx::query_as::<_, WasmDetailRow>(
-            "SELECT id, transaction_hash, ledger_sequence, created_at, \
-                    author, wasm_version, wasm_name, wasm_hash, channel FROM \
+            "SELECT sub.id, sub.transaction_hash, sub.ledger_sequence, sub.created_at, \
+                    sub.author, sub.wasm_version, sub.wasm_name, sub.wasm_hash, sub.channel \
+             FROM \
                (SELECT *, ROW_NUMBER() OVER \
                  (PARTITION BY wasm_name ORDER BY ledger_sequence DESC, wasm_version DESC) AS rn \
-                 FROM public.v3_published_wasms \
+                 FROM v1.published_wasms_with_channel \
                ) AS sub \
-             WHERE rn = 1 AND wasm_name = $1 AND channel = $2",
+             WHERE sub.rn = 1 AND sub.wasm_name = $1 \
+               AND sub.channel = $2",
         )
         .bind(wasm_name)
         .bind(channel)
@@ -252,8 +275,9 @@ async fn fetch_wasm_detail(
         Ok(Some(detail_row)) => {
             let versions = sqlx::query_as::<_, WasmVersionResult>(
                 "SELECT author, wasm_version, wasm_name, wasm_hash, channel \
-                 FROM public.v3_published_wasms \
-                 WHERE wasm_name = $1 AND channel = $2 \
+                 FROM v1.published_wasms_with_channel \
+                 WHERE wasm_name = $1 \
+                   AND channel = $2 \
                  ORDER BY ledger_sequence DESC, wasm_version DESC",
             )
             .bind(wasm_name)
@@ -291,9 +315,9 @@ async fn fetch_wasm_detail(
     }
 }
 
-async fn get_wasm_main_channel(pool: web::Data<PgPool>, path: web::Path<String>) -> HttpResponse {
+async fn get_wasm_root_channel(pool: web::Data<PgPool>, path: web::Path<String>) -> HttpResponse {
     let wasm_name = path.into_inner();
-    fetch_wasm_detail(pool.get_ref(), "main", &wasm_name, None).await
+    fetch_wasm_detail(pool.get_ref(), "root", &wasm_name, None).await
 }
 
 async fn get_wasm_latest(
@@ -301,20 +325,15 @@ async fn get_wasm_latest(
     path: web::Path<(String, String)>,
 ) -> HttpResponse {
     let (channel, wasm_name) = path.into_inner();
-    if channel != "main" && channel != "unverified" {
-        return HttpResponse::BadRequest().json(ErrorResponse {
-            error: "Limit must be an integer between 2 and 200".into(),
-        });
-    }
     fetch_wasm_detail(pool.get_ref(), &channel, &wasm_name, None).await
 }
 
-async fn get_wasm_version_main(
+async fn get_wasm_version_root(
     pool: web::Data<PgPool>,
     path: web::Path<(String, String)>,
 ) -> HttpResponse {
     let (wasm_name, version) = path.into_inner();
-    fetch_wasm_detail(pool.get_ref(), "main", &wasm_name, Some(&version)).await
+    fetch_wasm_detail(pool.get_ref(), "root", &wasm_name, Some(&version)).await
 }
 
 async fn get_wasm_version(
@@ -322,15 +341,10 @@ async fn get_wasm_version(
     path: web::Path<(String, String, String)>,
 ) -> HttpResponse {
     let (channel, wasm_name, version) = path.into_inner();
-    if channel != "main" && channel != "unverified" {
-        return HttpResponse::BadRequest().json(ErrorResponse {
-            error: "Limit must be an integer between 2 and 200".into(),
-        });
-    }
     fetch_wasm_detail(pool.get_ref(), &channel, &wasm_name, Some(&version)).await
 }
 
-async fn get_contracts_main(
+async fn get_contracts_root(
     pool: web::Data<PgPool>,
     query: web::Query<QueryParams>,
 ) -> HttpResponse {
@@ -355,12 +369,23 @@ async fn get_contracts_main(
                 registered.sac,
                 deployed.deployer,
                 wasms.wasm_version,
-                wasms.wasm_name
-            FROM public.v3_registered_contracts registered
-            LEFT JOIN public.v3_published_wasms wasms
-              ON registered.wasm_hash = wasms.wasm_hash
-            LEFT JOIN public.v3_deployed_contracts deployed
-              ON registered.contract_id = deployed.contract_id
+                wasms.wasm_name,
+                registries.registry_channel AS wasm_channel
+            FROM v1.registered_contracts_with_channel registered
+            LEFT JOIN (
+                SELECT DISTINCT ON (wasm_hash) wasm_hash, wasm_version, wasm_name
+                FROM v1.published_wasms
+                ORDER BY wasm_hash, ledger_sequence DESC
+            ) wasms ON wasms.wasm_hash = registered.wasm_hash
+            LEFT JOIN (
+                SELECT DISTINCT ON (contract_id) contract_id, deployer, registry_contract_id
+                FROM v1.deployed_contracts
+                ORDER BY contract_id, ledger_sequence DESC
+            ) deployed ON deployed.contract_id = registered.contract_id
+            LEFT JOIN (
+                SELECT DISTINCT ON (contract_id) contract_id, registry_channel
+                FROM v1.registries
+            ) registries ON deployed.registry_contract_id = registries.contract_id
             WHERE (registered.ledger_sequence, registered.id) >= ($1, $2)
             ORDER BY registered.ledger_sequence, registered.id ASC
             LIMIT $3",
@@ -390,13 +415,13 @@ async fn get_contracts_main(
     }
 }
 
-async fn get_single_contract_main(
+async fn get_single_contract_root(
     pool: web::Data<PgPool>,
     path: web::Path<String>,
 ) -> HttpResponse {
     let contract_name = path.into_inner();
 
-    fetch_single_contract("main", &contract_name, pool).await
+    fetch_single_contract("root", &contract_name, pool).await
 }
 
 async fn get_single_contract(
@@ -404,11 +429,6 @@ async fn get_single_contract(
     path: web::Path<(String, String)>,
 ) -> HttpResponse {
     let (channel, contract_name) = path.into_inner();
-    if channel != "main" && channel != "unverified" {
-        return HttpResponse::BadRequest().json(ErrorResponse {
-            error: "Limit must be an integer between 2 and 200".into(),
-        });
-    }
     fetch_single_contract(&channel, &contract_name, pool).await
 }
 
@@ -429,13 +449,27 @@ async fn fetch_single_contract(
                 registered.sac,
                 deployed.deployer,
                 wasms.wasm_version,
-                wasms.wasm_name
-            FROM public.v3_registered_contracts registered
-            LEFT JOIN public.v3_published_wasms wasms
-              ON registered.wasm_hash = wasms.wasm_hash
-            LEFT JOIN public.v3_deployed_contracts deployed
-              ON registered.contract_id = deployed.contract_id
-            WHERE contract_name = $1 AND registered.channel = $2",
+                wasms.wasm_name,
+                registries.registry_channel AS wasm_channel
+            FROM v1.registered_contracts_with_channel registered
+            LEFT JOIN (
+                SELECT DISTINCT ON (wasm_hash) wasm_hash, wasm_version, wasm_name
+                FROM v1.published_wasms
+                ORDER BY wasm_hash, ledger_sequence DESC
+            ) wasms ON wasms.wasm_hash = registered.wasm_hash
+            LEFT JOIN (
+                SELECT DISTINCT ON (contract_id) contract_id, deployer, registry_contract_id
+                FROM v1.deployed_contracts
+                ORDER BY contract_id, ledger_sequence DESC
+            ) deployed ON deployed.contract_id = registered.contract_id
+            LEFT JOIN (
+                SELECT DISTINCT ON (contract_id) contract_id, registry_channel
+                FROM v1.registries
+            ) registries ON deployed.registry_contract_id = registries.contract_id
+            WHERE registered.contract_name = $1
+              AND registered.channel = $2
+            ORDER BY registered.ledger_sequence DESC
+            LIMIT 1",
     )
     .bind(&contract_name)
     .bind(&channel)
@@ -461,11 +495,6 @@ async fn get_contract_deploy_detail(
     path: web::Path<(String, String)>,
 ) -> HttpResponse {
     let (channel, contract_name) = path.into_inner();
-    if channel != "main" && channel != "unverified" {
-        return HttpResponse::BadRequest().json(ErrorResponse {
-            error: "Limit must be an integer between 2 and 200".into(),
-        });
-    }
     fetch_single_contract_detail(&channel, &contract_name, pool).await
 }
 
@@ -481,12 +510,18 @@ async fn fetch_single_contract_detail(
                 registered.channel,
                 deployed.deployer,
                 raw_event.operation_body
-            FROM public.v3_registered_contracts registered
-            LEFT JOIN public.v3_deployed_contracts deployed
-              ON registered.contract_id = deployed.contract_id
-            LEFT JOIN public.v3_raw_events_backup raw_event
+            FROM v1.registered_contracts_with_channel registered
+            LEFT JOIN (
+                SELECT DISTINCT ON (contract_id) contract_id, deployer, transaction_hash
+                FROM v1.deployed_contracts
+                ORDER BY contract_id, ledger_sequence DESC
+            ) deployed ON deployed.contract_id = registered.contract_id
+            LEFT JOIN v1.raw_events_backup raw_event
               ON deployed.transaction_hash = raw_event.contract_id
-            WHERE contract_name = $1 AND registered.channel = $2",
+            WHERE registered.contract_name = $1
+              AND registered.channel = $2
+            ORDER BY registered.ledger_sequence DESC
+            LIMIT 1",
     )
     .bind(&contract_name)
     .bind(&channel)
@@ -567,9 +602,33 @@ async fn index_v1() -> HttpResponse {
             { "method": "GET", "path": "/v1/wasms/{channel}/{wasm_name}/v/{version}", "description": "Get a specific version of a wasm for a specific channel. Supported channels: main, unverified" },
             { "method": "GET", "path": "/v1/contracts", "description": "List all deployed contracts (main channel)" },
             { "method": "GET", "path": "/v1/contracts/{contract_name}", "description": "Get details for a deployed contract (main channel)" },
-            { "method": "GET", "path": "/v1/contracts/{channel}/{contract_name}", "description": "Get details for a deployed contract for a specific channel. Supported channels: main, unverified" },
+            { "method": "GET", "path": "/v1/contracts/{channel}/{contract_name}", "description": "Get details for a deployed contract for a specific channel." },
+            { "method": "GET", "path": "/v1/registries", "description": "List all known sub-registries announced by the root registry." },
         ]
     }))
+}
+
+async fn get_registries(pool: web::Data<PgPool>) -> HttpResponse {
+    let rows = sqlx::query_as::<_, Registry>(
+        "SELECT contract_id, registry_channel as channel, ledger_sequence, created_at \
+         FROM v1.registries \
+         ORDER BY channel ASC",
+    )
+    .fetch_all(pool.get_ref())
+    .await;
+
+    match rows {
+        Ok(rows) => HttpResponse::Ok().json(ListResponse::<Registry> {
+            result: rows,
+            next: None,
+        }),
+        Err(e) => {
+            eprintln!("Database error: {e}");
+            HttpResponse::InternalServerError().json(ErrorResponse {
+                error: "Internal server error".into(),
+            })
+        }
+    }
 }
 
 async fn health() -> HttpResponse {
@@ -601,7 +660,7 @@ async fn main() -> std::io::Result<()> {
             .route("/v1/wasms", web::get().to(get_wasms))
             .route(
                 "/v1/wasms/{wasm_name}",
-                web::get().to(get_wasm_main_channel),
+                web::get().to(get_wasm_root_channel),
             )
             .route(
                 "/v1/wasms/{channel}/{wasm_name}",
@@ -609,16 +668,17 @@ async fn main() -> std::io::Result<()> {
             )
             .route(
                 "/v1/wasms/{wasm_name}/v/{version}",
-                web::get().to(get_wasm_version_main),
+                web::get().to(get_wasm_version_root),
             )
             .route(
                 "/v1/wasms/{channel}/{wasm_name}/v/{version}",
                 web::get().to(get_wasm_version),
             )
-            .route("/v1/contracts", web::get().to(get_contracts_main))
+            .route("/v1/registries", web::get().to(get_registries))
+            .route("/v1/contracts", web::get().to(get_contracts_root))
             .route(
                 "/v1/contracts/{contract_name}",
-                web::get().to(get_single_contract_main),
+                web::get().to(get_single_contract_root),
             )
             .route(
                 "/v1/contracts/{channel}/{contract_name}",
