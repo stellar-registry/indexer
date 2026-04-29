@@ -286,7 +286,7 @@ sinks:
         table: published_wasms
         type: postgres
     raw_events_backup:
-        from: transform_1_events_raw
+        from: transform_2_events_with_name_raw
         schema: v1
         secret_name: HOSTED_POSTGRES_CMJD1KI8O0
         table: raw_events_backup
