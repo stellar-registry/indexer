@@ -130,7 +130,7 @@ struct ContractDetail {
 
 /// Row mapping for v1.contract_upgrades. Each row is one host-emitted
 /// `executable_update` system event for a contract that's tracked by a
-/// registry (root + sub-registries) or registered with one.
+/// registry (root + sub-registries) or deployed with one.
 #[derive(sqlx::FromRow, Serialize, Clone)]
 struct ContractUpgrade {
     id: String,
