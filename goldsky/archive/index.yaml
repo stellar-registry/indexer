@@ -1,0 +1,171 @@
+name: contract-lifecycle-testnet
+resource_size: s
+use_dedicated_ip: false
+job: false
+# ─────────────────────────────────────────────────────────────────────────────
+# SOURCES
+# stellar_testnet.operations carries every host function invocation
+# (invoke_contract / create_contract / create_contract_v2 /
+# upload_contract_wasm). The host_function variant lives at
+#   body.invoke_host_function.host_function.<variant>
+# stellar_testnet.events carries the system `executable_update` events
+# we use for upgrades.
+# ─────────────────────────────────────────────────────────────────────────────
+sources:
+    stellar_operations:
+        type: dataset
+        dataset_name: stellar_testnet.operations
+        version: 1.2.0
+        start_at: earliest
+
+    stellar_events:
+        type: dataset
+        dataset_name: stellar_testnet.events
+        version: 1.2.0
+        start_at: earliest
+
+transforms:
+    # Wasm upload metadata. wasm_hash is sha256(wasm_bytes), encoded as
+    # the lowercase hex text used everywhere else in the schema (matches
+    # v1.published_wasms.wasm_hash). The wasm bytes themselves go to
+    # wasm_binaries — keeping them out of this row keeps per-upload
+    # lookups cheap.
+    wasm_uploads:
+        type: sql
+        primary_key: id
+        sql: |-
+            SELECT
+              id,
+              ledger_sequence,
+              ledger_closed_at AS closed_at,
+              transaction_hash,
+              source_account,
+              ENCODE(
+                SHA256(DECODE(JSON_VALUE(body, '$.invoke_host_function.host_function.upload_contract_wasm'), 'hex')),
+                'hex'
+              ) AS wasm_hash
+            FROM stellar_operations
+            WHERE `type` = 'invoke_host_function'
+              AND transaction_successful = true
+              AND JSON_VALUE(body, '$.invoke_host_function.host_function.upload_contract_wasm') IS NOT NULL
+
+    # Wasm bytecode keyed by content hash. Same hash computation as
+    # wasm_uploads — re-uploads collapse into a single row by upserting
+    # on wasm_hash.
+    wasm_binaries:
+        type: sql
+        primary_key: wasm_hash
+        sql: |-
+            SELECT
+              ENCODE(
+                SHA256(DECODE(JSON_VALUE(body, '$.invoke_host_function.host_function.upload_contract_wasm'), 'hex')),
+                'hex'
+              ) AS wasm_hash,
+              JSON_VALUE(body, '$.invoke_host_function.host_function.upload_contract_wasm') AS wasm,
+              ledger_sequence,
+              ledger_closed_at AS closed_at
+            FROM stellar_operations
+            WHERE `type` = 'invoke_host_function'
+              AND transaction_successful = true
+              AND JSON_VALUE(body, '$.invoke_host_function.host_function.upload_contract_wasm') IS NOT NULL
+
+    # CreateContract / CreateContractV2 host function calls.
+    #   - wasm_hash:           executable.wasm — the wasm this deploy
+    #                          binds to. NULL for SAC creates whose
+    #                          executable is `{stellar_asset: null}`.
+    #   - new_contract_hash:   operation_result.invoke_host_function.success
+    #                          — the deployed contract's id as a 32-byte
+    #                          hex hash. (StrKey C… encoding is left to
+    #                          the consumer; Flink has no UDF for it.)
+    #   - preimage_address /   the from_address variant of
+    #     preimage_salt /      contract_id_preimage. SAC deploys (asset
+    #     preimage_asset       preimage) leave address+salt NULL and
+    #                          populate preimage_asset.
+    contract_deploys:
+        type: sql
+        primary_key: id
+        sql: |-
+            SELECT
+              id,
+              ledger_sequence,
+              ledger_closed_at AS closed_at,
+              transaction_hash,
+              source_account,
+              CASE
+                WHEN JSON_EXISTS(body, '$.invoke_host_function.host_function.create_contract_v2')
+                  THEN 'create_contract_v2'
+                WHEN JSON_EXISTS(body, '$.invoke_host_function.host_function.create_contract')
+                  THEN 'create_contract'
+              END AS deployment_kind,
+              COALESCE(
+                JSON_VALUE(body, '$.invoke_host_function.host_function.create_contract_v2.executable.wasm'),
+                JSON_VALUE(body, '$.invoke_host_function.host_function.create_contract.executable.wasm')
+              ) AS wasm_hash,
+              JSON_VALUE(operation_result, '$.invoke_host_function.success') AS new_contract_hash,
+              COALESCE(
+                JSON_VALUE(body, '$.invoke_host_function.host_function.create_contract_v2.contract_id_preimage.address.address'),
+                JSON_VALUE(body, '$.invoke_host_function.host_function.create_contract.contract_id_preimage.address.address')
+              ) AS preimage_address,
+              COALESCE(
+                JSON_VALUE(body, '$.invoke_host_function.host_function.create_contract_v2.contract_id_preimage.address.salt'),
+                JSON_VALUE(body, '$.invoke_host_function.host_function.create_contract.contract_id_preimage.address.salt')
+              ) AS preimage_salt,
+              COALESCE(
+                JSON_VALUE(body, '$.invoke_host_function.host_function.create_contract_v2.contract_id_preimage.asset'),
+                JSON_VALUE(body, '$.invoke_host_function.host_function.create_contract.contract_id_preimage.asset')
+              ) AS preimage_asset
+            FROM stellar_operations
+            WHERE `type` = 'invoke_host_function'
+              AND transaction_successful = true
+              AND (JSON_EXISTS(body, '$.invoke_host_function.host_function.create_contract')
+                   OR JSON_EXISTS(body, '$.invoke_host_function.host_function.create_contract_v2'))
+
+    upgrade_events:
+        type: sql
+        primary_key: id
+        sql: |-
+            SELECT
+              id,
+              transaction_hash,
+              ledger_sequence,
+              ledger_closed_at AS created_at,
+              contract_id AS upgraded_contract_id,
+              JSON_VALUE(topics, '$[1].vec[0].symbol') AS old_executable_kind,
+              JSON_VALUE(topics, '$[1].vec[1].bytes') AS old_wasm_hash,
+              JSON_VALUE(topics, '$[2].vec[0].symbol') AS new_executable_kind,
+              JSON_VALUE(topics, '$[2].vec[1].bytes') AS new_wasm_hash
+            FROM stellar_events
+            WHERE `type` = 'system'
+              AND in_successful_contract_call = true
+              AND transaction_successful = true
+              AND id NOT LIKE '%-op-none-%'
+              AND JSON_VALUE(topics, '$[0].symbol') = 'executable_update'
+
+sinks:
+    uploads_pg:
+        from: wasm_uploads
+        schema: archive
+        secret_name: HOSTED_POSTGRES_CMJD1KI8O0
+        table: uploads
+        type: postgres
+
+    wasm_binaries_pg:
+        from: wasm_binaries
+        schema: archive
+        secret_name: HOSTED_POSTGRES_CMJD1KI8O0
+        table: wasm_binaries
+        type: postgres
+
+    deploys_pg:
+        from: contract_deploys
+        schema: archive
+        secret_name: HOSTED_POSTGRES_CMJD1KI8O0
+        table: deploys
+        type: postgres
+
+    upgrades_pg:
+        from: upgrade_events
+        schema: archive
+        secret_name: HOSTED_POSTGRES_CMJD1KI8O0
+        table: upgrades
+        type: postgres
