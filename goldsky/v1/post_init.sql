@@ -1,133 +1,98 @@
--- Views that expose `resolved_channel` — the friendly channel name from
--- v1.registries when available, otherwise the raw emitter contract_id.
+-- v1 post-init views and helpers.
 --
--- The v1 pipeline writes emitter contract_ids into the `channel` column
--- of v1.published_wasms and v1.registered_contracts (the `contract_id as
--- channel` projection in goldsky/v1/index.yaml). Callers of the API
--- pass friendly names like "root" or "soroswap", so every read needs to
--- translate contract_id → name via v1.registries. These views
--- encapsulate that translation so individual queries don't each repeat
--- the LEFT JOIN + COALESCE.
+-- search_path makes every unqualified name in this file resolve to the
+-- v1 schema — for CREATE VIEW / CREATE FUNCTION (where the object lands)
+-- and for FROM/JOIN/function-call references (which Postgres rewrites
+-- against search_path at view-creation time and stores as schema-
+-- qualified, so the views remain stable when callers later query them
+-- under a different search_path).
+--
+-- Cross-schema references stay explicit: archive.* lives in its own
+-- schema (see goldsky/archive/index.yaml) and must not be hidden by
+-- search_path resolution.
 
-CREATE OR REPLACE VIEW v1.published_wasms_with_channel AS
+SET search_path TO v1, public;
+
+-- Channel views: translate emitter_contract_id → friendly channel name
+-- via the registries table.
+
+CREATE OR REPLACE VIEW published_wasms_with_channel AS
 SELECT
   w.*,
   r.registry_channel AS channel
-FROM v1.published_wasms w
-JOIN v1.registries r ON r.contract_id = w.emitter_contract_id;
+FROM published_wasms w
+JOIN registries r ON r.contract_id = w.emitter_contract_id;
 
-CREATE OR REPLACE VIEW v1.registered_contracts_with_channel AS
+CREATE OR REPLACE VIEW registered_contracts_with_channel AS
 SELECT
   c.*,
   r.registry_channel AS channel
-FROM v1.registered_contracts c
-JOIN v1.registries r ON r.contract_id = c.emitter_contract_id;
+FROM registered_contracts c
+JOIN registries r ON r.contract_id = c.emitter_contract_id;
 
--- StrKey contract encoding: 32-byte hex hash → 56-char "C…" form.
---
--- archive.deploys.new_contract_hash is the raw 32-byte hash returned by
--- operation_result.invoke_host_function.success, encoded as lowercase
--- hex. Every other contract_id in the schema (registered_contracts,
--- deployed_contracts, archive.upgrades.upgraded_contract_id) is the
--- StrKey C… form decoded from event payloads. To filter v1.versions by
--- a caller-supplied StrKey contract_id we need an in-database encoder
--- — Flink has no UDF for this, so the bridge has to live in Postgres.
---
--- Encoding follows SEP-23:
---   1. payload = 0x10 (contract version byte: 2 << 3) || 32-byte hash  (33 bytes)
---   2. crc    = CRC16-XMODEM(payload)
---   3. result = base32_no_padding(payload || lo(crc) || hi(crc))       (35 → 56 chars)
+-- Absolute latest publish per wasm_name, across all channels. Tie-break
+-- on wasm_version (semver text) when two publishes land in the same
+-- ledger.
 
-CREATE OR REPLACE FUNCTION v1.crc16_xmodem(input bytea)
-RETURNS integer
-LANGUAGE plpgsql IMMUTABLE STRICT AS $$
-DECLARE
-  crc integer := 0;
-  i   integer;
-  j   integer;
-BEGIN
-  FOR i IN 0..octet_length(input) - 1 LOOP
-    crc := (crc # (get_byte(input, i) << 8)) & 65535;
-    FOR j IN 1..8 LOOP
-      IF (crc & 32768) <> 0 THEN
-        crc := ((crc << 1) # 4129) & 65535;
-      ELSE
-        crc := (crc << 1) & 65535;
-      END IF;
-    END LOOP;
-  END LOOP;
-  RETURN crc;
-END;
-$$;
+CREATE OR REPLACE VIEW latest_published_wasms AS
+SELECT *
+FROM (
+  SELECT
+    w.*,
+    ROW_NUMBER() OVER (
+      PARTITION BY wasm_name
+      ORDER BY ledger_sequence DESC, wasm_version DESC
+    ) AS rn
+  FROM published_wasms_with_channel w
+) sub
+WHERE rn = 1;
 
-CREATE OR REPLACE FUNCTION v1.base32_encode(input bytea)
-RETURNS text
-LANGUAGE plpgsql IMMUTABLE STRICT AS $$
-DECLARE
-  alphabet constant text := 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-  out_text text := '';
-  bits     int  := 0;
-  buf      int  := 0;
-  i        int;
-BEGIN
-  FOR i IN 0..octet_length(input) - 1 LOOP
-    buf  := (buf << 8) | get_byte(input, i);
-    bits := bits + 8;
-    WHILE bits >= 5 LOOP
-      bits := bits - 5;
-      out_text := out_text || substr(alphabet, ((buf >> bits) & 31) + 1, 1);
-    END LOOP;
-  END LOOP;
-  IF bits > 0 THEN
-    out_text := out_text || substr(alphabet, ((buf << (5 - bits)) & 31) + 1, 1);
-  END IF;
-  RETURN out_text;
-END;
-$$;
+-- Registered contracts decorated with deployer (from deployed_contracts),
+-- the wasm metadata of the initial wasm (from published_wasms), and the
+-- channel of the registry that emitted the deploy (wasm_channel). Backs
+-- the /v1/contracts list and /v1/contracts/{name} detail endpoints.
 
-CREATE OR REPLACE FUNCTION v1.strkey_contract(hex_hash text)
-RETURNS text
-LANGUAGE plpgsql IMMUTABLE AS $$
-DECLARE
-  versioned bytea;
-  crc       int;
-BEGIN
-  IF hex_hash IS NULL OR length(hex_hash) <> 64 THEN
-    RETURN NULL;
-  END IF;
-  versioned := decode('10', 'hex') || decode(hex_hash, 'hex');
-  crc := v1.crc16_xmodem(versioned);
-  RETURN v1.base32_encode(
-    versioned
-    || decode(lpad(to_hex(crc & 255),        2, '0'), 'hex')
-    || decode(lpad(to_hex((crc >> 8) & 255), 2, '0'), 'hex')
-  );
-END;
-$$;
+CREATE OR REPLACE VIEW contracts_enriched AS
+SELECT
+  registered.id,
+  registered.transaction_hash,
+  registered.ledger_sequence,
+  registered.created_at,
+  registered.contract_id,
+  registered.contract_name,
+  registered.channel,
+  registered.sac,
+  deployed.deployer,
+  wasms.wasm_version,
+  wasms.wasm_name,
+  registries.registry_channel AS wasm_channel
+FROM registered_contracts_with_channel registered
+LEFT JOIN (
+  SELECT DISTINCT ON (wasm_hash) wasm_hash, wasm_version, wasm_name
+  FROM published_wasms
+  ORDER BY wasm_hash, ledger_sequence DESC
+) wasms ON wasms.wasm_hash = registered.wasm_hash
+LEFT JOIN (
+  SELECT DISTINCT ON (contract_id) contract_id, deployer, registry_contract_id
+  FROM deployed_contracts
+  ORDER BY contract_id, ledger_sequence DESC
+) deployed ON deployed.contract_id = registered.contract_id
+LEFT JOIN (
+  SELECT DISTINCT ON (contract_id) contract_id, registry_channel
+  FROM registries
+) registries ON deployed.registry_contract_id = registries.contract_id;
 
--- v1.wasm_versions — one row per (uploaded wasm × publish event), with
--- bare uploads kept as rows whose publish-side columns are NULL. This
--- view used to be called v1.versions; it was renamed when v1.versions
--- was repurposed to mean "the version history of a contract".
---
--- archive.uploads is the canonical, hash-addressable inventory of wasm
--- bytecode. v1.published_wasms records `publish` events emitted by
--- registry contracts, decorating a wasm_hash with author + name +
--- semver. The same wasm_hash can be published into many registries
--- (one row per channel), and a wasm can be uploaded without ever being
--- published — a LEFT JOIN from uploads to published_wasms keeps both
--- shapes in one view.
+-- One row per (uploaded wasm × publish event); bare uploads kept with
+-- NULL publish-side columns. Read-side view over the upload-addressable
+-- archive joined to publish metadata — same shape as v1.wasm_versions.
 
-DROP VIEW IF EXISTS v1.versions;  -- old definition (upload × publish join)
-
-CREATE OR REPLACE VIEW v1.wasm_versions AS
+CREATE OR REPLACE VIEW wasm_versions AS
 SELECT
   u.wasm_hash,
   u.id                         AS upload_id,
   u.ledger_sequence            AS uploaded_ledger_sequence,
   u.closed_at                  AS uploaded_at,
   u.transaction_hash           AS upload_transaction_hash,
-  u.source_account             AS uploader,
   p.id                         AS publish_id,
   p.transaction_hash           AS publish_transaction_hash,
   p.ledger_sequence            AS publish_ledger_sequence,
@@ -137,63 +102,60 @@ SELECT
   p.wasm_version,
   p.emitter_contract_id        AS publish_registry_contract_id
 FROM archive.uploads u
-LEFT JOIN v1.published_wasms p ON p.wasm_hash = u.wasm_hash;
+LEFT JOIN published_wasms p ON p.wasm_hash = u.wasm_hash;
 
--- v1.versions — version history of a contract.
+-- Contract version history: the contract's actual deploy wasm
+-- (kind='initial') plus each subsequent executable_update event
+-- (kind='upgrade'), ordered chronologically within each contract.
 --
--- One row per (contract_id × wasm transition), ordered chronologically
--- within each contract. The first row (version_index = 0, kind =
--- 'initial') is the wasm the contract was deployed with; subsequent
--- rows (kind = 'upgrade') are runtime executable_update events.
+-- Initial rows come from archive.deploys, which is now sourced from
+-- the ledger_entries dataset (ContractData entries with
+-- change_type='created' and key=LedgerKeyContractInstance). This
+-- captures both top-level CreateContract operations AND factory
+-- sub-invocations, so every wasm-backed contract has its real deploy
+-- row regardless of how it was created.
 --
--- Sources:
---   archive.deploys     — host-function CreateContract / CreateContractV2.
---                         Anchors the initial wasm. Keyed by hex
---                         contract hash, encoded to StrKey via
---                         v1.strkey_contract(). SAC creates (NULL
---                         wasm_hash) are excluded.
---   archive.upgrades    — system `executable_update` events. Already
---                         keyed by StrKey contract_id, no encoding
---                         needed.
+-- Why not registered_contracts.wasm_hash? Because that records the
+-- wasm a contract was running at REGISTRATION TIME, not at deploy
+-- time. A contract deployed via a non-registry path and only later
+-- registered would lose its actual initial wasm history.
+-- archive.deploys captures the on-chain truth.
 --
--- Each row carries transition provenance only — kind, source_id (id
--- from the underlying archive table), ledger_sequence,
--- transaction_hash, created_at, and the wasm_hash that became active
--- at that transition. Publish metadata (author / wasm_name /
--- wasm_version) is intentionally not joined here; callers that need
--- it can JOIN v1.published_wasms ON wasm_hash themselves, or use
--- v1.wasm_versions for the upload-side view.
+-- Upgrade rows come from archive.upgrades (host-emitted
+-- executable_update system events). Both archive.deploys.contract_id
+-- and archive.upgrades.upgraded_contract_id are StrKey form, so the
+-- UNION ALL is direct with no encoding bridge.
 --
--- Typical use:
---   SELECT * FROM v1.versions
---   WHERE contract_id = 'C…'
---   ORDER BY version_index;
+-- wasm_name / wasm_version come from a DISTINCT ON join against
+-- published_wasms — both NULL when the wasm was uploaded but never
+-- published.
 
-CREATE VIEW v1.versions AS
+CREATE OR REPLACE VIEW versions AS
 SELECT
-  contract_id,
+  t.contract_id,
   ROW_NUMBER() OVER (
-    PARTITION BY contract_id
-    ORDER BY ledger_sequence, source_id
+    PARTITION BY t.contract_id
+    ORDER BY t.ledger_sequence, t.source_id
   ) - 1 AS version_index,
-  kind,
-  wasm_hash,
-  source_id,
-  ledger_sequence,
-  transaction_hash,
-  created_at
+  t.kind,
+  t.wasm_hash,
+  p.wasm_name,
+  p.wasm_version,
+  t.source_id,
+  t.ledger_sequence,
+  t.transaction_hash,
+  t.created_at
 FROM (
   SELECT
-    v1.strkey_contract(d.new_contract_hash) AS contract_id,
-    'initial'::text                          AS kind,
-    d.wasm_hash                              AS wasm_hash,
-    d.id                                     AS source_id,
-    d.ledger_sequence                        AS ledger_sequence,
-    d.transaction_hash                       AS transaction_hash,
-    d.closed_at                              AS created_at
+    d.contract_id,
+    'initial'::text   AS kind,
+    d.wasm_hash       AS wasm_hash,
+    d.id              AS source_id,
+    d.ledger_sequence AS ledger_sequence,
+    d.transaction_hash,
+    d.closed_at       AS created_at
   FROM archive.deploys d
-  WHERE d.new_contract_hash IS NOT NULL
-    AND d.wasm_hash IS NOT NULL
+  WHERE d.wasm_hash IS NOT NULL
   UNION ALL
   SELECT
     u.upgraded_contract_id,
@@ -204,4 +166,9 @@ FROM (
     u.transaction_hash,
     u.created_at
   FROM archive.upgrades u
-) transitions;
+) t
+LEFT JOIN (
+  SELECT DISTINCT ON (wasm_hash) wasm_hash, wasm_name, wasm_version
+  FROM published_wasms
+  ORDER BY wasm_hash, ledger_sequence DESC
+) p ON p.wasm_hash = t.wasm_hash;
