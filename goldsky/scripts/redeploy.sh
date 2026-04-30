@@ -125,11 +125,21 @@ if [[ -z "${DATABASE_URL:-}" ]]; then
   exit 1
 fi
 
-# Extract pipeline name from the YAML (first "name:" line)
+# Extract pipeline name from the YAML (first "name:" line) and the
+# Postgres sink schema (first indented "schema: X" line — sinks share a
+# schema, so the first match is canonical). PIPELINE_SCHEMA replaces
+# previously-hardcoded "v1." prefixes (e.g. in the dynamic-table audit),
+# so the same script works against goldsky/v1, goldsky/v2, etc.
 PIPELINE_NAME=""
+PIPELINE_SCHEMA=""
 while IFS= read -r line; do
-  if [[ "$line" =~ ^name:[[:space:]]+(.+)$ ]]; then
+  if [[ -z "$PIPELINE_NAME" && "$line" =~ ^name:[[:space:]]+(.+)$ ]]; then
     PIPELINE_NAME="${BASH_REMATCH[1]}"
+  fi
+  if [[ -z "$PIPELINE_SCHEMA" && "$line" =~ ^[[:space:]]+schema:[[:space:]]+(.+)$ ]]; then
+    PIPELINE_SCHEMA="${BASH_REMATCH[1]}"
+  fi
+  if [[ -n "$PIPELINE_NAME" && -n "$PIPELINE_SCHEMA" ]]; then
     break
   fi
 done < "$YAML_FILE"
@@ -139,7 +149,13 @@ if [[ -z "$PIPELINE_NAME" ]]; then
   exit 1
 fi
 
+if [[ -z "$PIPELINE_SCHEMA" ]]; then
+  echo "error: could not find sink schema in $YAML_FILE" >&2
+  exit 1
+fi
+
 echo "==> pipeline: $PIPELINE_NAME"
+echo "==> schema:   $PIPELINE_SCHEMA"
 echo "==> dir:      $PIPELINE_DIR"
 echo "==> yaml:     $YAML_FILE"
 if [[ -f "$POST_INIT_SQL" ]]; then
@@ -221,11 +237,11 @@ if [[ -n "$EXPECTED_SUBREGISTRIES" ]]; then
   dt_delay="${DYNAMIC_TABLE_RETRY_DELAY:-5}"
   settle_delay="${AUDIT_SETTLE_DELAY:-10}"
 
-  echo "==> waiting for v1.registries_dynamic_table to reach $EXPECTED_SUBREGISTRIES rows"
+  echo "==> waiting for ${PIPELINE_SCHEMA}.registries_dynamic_table to reach $EXPECTED_SUBREGISTRIES rows"
   echo "    (up to $dt_max_attempts attempts, ${dt_delay}s apart)..."
   attempt=1
   while true; do
-    count=$(psql "$DATABASE_URL" -tAc 'SELECT count(*) FROM v1.registries_dynamic_table' 2>/dev/null || echo "")
+    count=$(psql "$DATABASE_URL" -tAc "SELECT count(*) FROM ${PIPELINE_SCHEMA}.registries_dynamic_table" 2>/dev/null || echo "")
     if [[ "$count" == "$EXPECTED_SUBREGISTRIES" ]]; then
       echo "==> dynamic table seeded: $count/$EXPECTED_SUBREGISTRIES rows (attempt $attempt/$dt_max_attempts)"
       break
