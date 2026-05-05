@@ -105,9 +105,10 @@ struct ContractDetail {
 
 /// Row mapping for v1.versions — one row per (contract × wasm transition),
 /// chronologically ordered within a contract. kind is 'initial' for the
-/// deploy row, 'upgrade' for runtime executable_update events. wasm_name
-/// and wasm_version come from a join against published_wasms; both are
-/// NULL for wasms that were uploaded but never published.
+/// deploy row, 'upgrade' for runtime executable_update events. wasm_name,
+/// wasm_version, and wasm_channel come from a join against published_wasms
+/// and the originating registry; all three are NULL for wasms that were
+/// uploaded but never published.
 #[derive(sqlx::FromRow, Serialize, Clone)]
 struct ContractVersion {
     version_index: i64,
@@ -115,6 +116,7 @@ struct ContractVersion {
     wasm_hash: Option<String>,
     wasm_name: Option<String>,
     wasm_version: Option<String>,
+    wasm_channel: Option<String>,
     transaction_hash: Option<String>,
     ledger_sequence: i64,
     created_at: chrono::NaiveDateTime,
@@ -126,7 +128,6 @@ struct ContractVersion {
 struct ContractDetailResponse {
     #[serde(flatten)]
     detail: ContractDetail,
-    current_wasm_hash: Option<String>,
     versions: Vec<ContractVersion>,
 }
 
@@ -432,7 +433,6 @@ async fn fetch_single_contract(
 
     let Some(contract_id) = detail.contract_id.clone() else {
         return HttpResponse::Ok().json(ContractDetailResponse {
-            current_wasm_hash: None,
             versions: vec![],
             detail,
         });
@@ -448,13 +448,7 @@ async fn fetch_single_contract(
         }
     };
 
-    let current_wasm_hash = versions.last().and_then(|v| v.wasm_hash.clone());
-
-    HttpResponse::Ok().json(ContractDetailResponse {
-        detail,
-        current_wasm_hash,
-        versions,
-    })
+    HttpResponse::Ok().json(ContractDetailResponse { detail, versions })
 }
 
 async fn fetch_versions_for_contract_id(
@@ -462,7 +456,7 @@ async fn fetch_versions_for_contract_id(
     pool: &PgPool,
 ) -> Result<Vec<ContractVersion>, sqlx::Error> {
     sqlx::query_as::<_, ContractVersion>(
-        "SELECT version_index, kind, wasm_hash, wasm_name, wasm_version, \
+        "SELECT version_index, kind, wasm_hash, wasm_name, wasm_version, wasm_channel, \
                 transaction_hash, ledger_sequence, created_at \
          FROM versions \
          WHERE contract_id = $1 \
@@ -584,8 +578,8 @@ async fn index_v1() -> HttpResponse {
             { "method": "GET", "path": "/v1/wasms/{wasm_name}/v/{version}", "description": "Get a specific version of a wasm (main channel)" },
             { "method": "GET", "path": "/v1/wasms/{channel}/{wasm_name}/v/{version}", "description": "Get a specific version of a wasm for a specific channel. Supported channels: main, unverified" },
             { "method": "GET", "path": "/v1/contracts", "description": "List all deployed contracts (main channel)" },
-            { "method": "GET", "path": "/v1/contracts/{contract_name}", "description": "Get details for a deployed contract (main channel), including current_wasm_hash and the wasm versions history" },
-            { "method": "GET", "path": "/v1/contracts/{channel}/{contract_name}", "description": "Get details for a deployed contract for a specific channel, including current_wasm_hash and the wasm versions history" },
+            { "method": "GET", "path": "/v1/contracts/{contract_name}", "description": "Get details for a deployed contract (main channel), including the wasm versions history" },
+            { "method": "GET", "path": "/v1/contracts/{channel}/{contract_name}", "description": "Get details for a deployed contract for a specific channel, including the wasm versions history" },
             { "method": "GET", "path": "/v1/registries", "description": "List all known sub-registries announced by the root registry." },
         ]
     }))
@@ -626,7 +620,7 @@ async fn main() -> std::io::Result<()> {
         .max_connections(5)
         .after_connect(|conn, _meta| {
             Box::pin(async move {
-                conn.execute("SET search_path TO v1, public").await?;
+                conn.execute("SET search_path TO v1").await?;
                 Ok(())
             })
         })
