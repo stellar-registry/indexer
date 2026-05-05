@@ -56,7 +56,7 @@
 --
 -- A result set of zero rows means no race-dropped events were found.
 
-SET search_path TO v1, public;
+SET search_path TO v1;
 
 WITH raw AS (
   SELECT

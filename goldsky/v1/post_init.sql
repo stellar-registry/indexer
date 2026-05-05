@@ -11,7 +11,7 @@
 -- schema (see goldsky/archive/index.yaml) and must not be hidden by
 -- search_path resolution.
 
-SET search_path TO v1, public;
+SET search_path TO v1;
 
 -- Channel views: translate emitter_contract_id → friendly channel name
 -- via the registries table.
@@ -46,41 +46,6 @@ FROM (
   FROM published_wasms_with_channel w
 ) sub
 WHERE rn = 1;
-
--- Registered contracts decorated with deployer (from deployed_contracts),
--- the wasm metadata of the initial wasm (from published_wasms), and the
--- channel of the registry that emitted the deploy (wasm_channel). Backs
--- the /v1/contracts list and /v1/contracts/{name} detail endpoints.
-
-CREATE OR REPLACE VIEW contracts_enriched AS
-SELECT
-  registered.id,
-  registered.transaction_hash,
-  registered.ledger_sequence,
-  registered.created_at,
-  registered.contract_id,
-  registered.contract_name,
-  registered.channel,
-  registered.sac,
-  deployed.deployer,
-  wasms.wasm_version,
-  wasms.wasm_name,
-  registries.registry_channel AS wasm_channel
-FROM registered_contracts_with_channel registered
-LEFT JOIN (
-  SELECT DISTINCT ON (wasm_hash) wasm_hash, wasm_version, wasm_name
-  FROM published_wasms
-  ORDER BY wasm_hash, ledger_sequence DESC
-) wasms ON wasms.wasm_hash = registered.wasm_hash
-LEFT JOIN (
-  SELECT DISTINCT ON (contract_id) contract_id, deployer, registry_contract_id
-  FROM deployed_contracts
-  ORDER BY contract_id, ledger_sequence DESC
-) deployed ON deployed.contract_id = registered.contract_id
-LEFT JOIN (
-  SELECT DISTINCT ON (contract_id) contract_id, registry_channel
-  FROM registries
-) registries ON deployed.registry_contract_id = registries.contract_id;
 
 -- One row per (uploaded wasm × publish event); bare uploads kept with
 -- NULL publish-side columns. Read-side view over the upload-addressable
@@ -126,11 +91,14 @@ LEFT JOIN published_wasms p ON p.wasm_hash = u.wasm_hash;
 -- and archive.upgrades.upgraded_contract_id are StrKey form, so the
 -- UNION ALL is direct with no encoding bridge.
 --
--- wasm_name / wasm_version come from a DISTINCT ON join against
--- published_wasms — both NULL when the wasm was uploaded but never
--- published.
+-- wasm_name / wasm_version / wasm_channel come from a DISTINCT ON join
+-- against published_wasms (and through it to registries). All three
+-- are NULL when the wasm was uploaded but never published.
 
-CREATE OR REPLACE VIEW versions AS
+DROP VIEW IF EXISTS contracts_enriched;
+DROP VIEW IF EXISTS versions;
+
+CREATE VIEW versions AS
 SELECT
   t.contract_id,
   ROW_NUMBER() OVER (
@@ -141,6 +109,7 @@ SELECT
   t.wasm_hash,
   p.wasm_name,
   p.wasm_version,
+  r.registry_channel AS wasm_channel,
   t.source_id,
   t.ledger_sequence,
   t.transaction_hash,
@@ -168,7 +137,65 @@ FROM (
   FROM archive.upgrades u
 ) t
 LEFT JOIN (
-  SELECT DISTINCT ON (wasm_hash) wasm_hash, wasm_name, wasm_version
+  SELECT DISTINCT ON (wasm_hash) wasm_hash, wasm_name, wasm_version, emitter_contract_id
   FROM published_wasms
   ORDER BY wasm_hash, ledger_sequence DESC
-) p ON p.wasm_hash = t.wasm_hash;
+) p ON p.wasm_hash = t.wasm_hash
+LEFT JOIN registries r ON r.contract_id = p.emitter_contract_id;
+
+-- One row per known contract — the JOIN of registered_contracts (the
+-- registry's `register` events, which give the contract a name) and
+-- deployed_contracts (the registry's `deploy` events, which record who
+-- triggered the deploy). Anchored on registered_contracts because the
+-- API addresses contracts by name; deployed-only contracts (deploy
+-- event but no register event) are out of scope.
+
+DROP VIEW IF EXISTS contracts;
+
+CREATE VIEW contracts AS
+SELECT
+  registered.id,
+  registered.transaction_hash,
+  registered.ledger_sequence,
+  registered.created_at,
+  registered.contract_id,
+  registered.contract_name,
+  registered.channel,
+  registered.sac,
+  registered.wasm_hash,
+  deployed.deployer,
+  deployed.registry_contract_id
+FROM registered_contracts_with_channel registered
+LEFT JOIN (
+  SELECT DISTINCT ON (contract_id) contract_id, deployer, registry_contract_id
+  FROM deployed_contracts
+  ORDER BY contract_id, ledger_sequence DESC
+) deployed ON deployed.contract_id = registered.contract_id;
+
+-- Contracts decorated with the metadata of the wasm they're CURRENTLY
+-- running — the latest version row from v1.versions per contract.
+-- wasm_name / wasm_version / wasm_channel reflect the latest upgrade
+-- (or the initial deploy if the contract has never been upgraded).
+-- Backs /v1/contracts list and /v1/contracts/{name} detail endpoints.
+
+CREATE VIEW contracts_enriched AS
+SELECT
+  c.id,
+  c.transaction_hash,
+  c.ledger_sequence,
+  c.created_at,
+  c.contract_id,
+  c.contract_name,
+  c.channel,
+  c.sac,
+  c.deployer,
+  latest.wasm_version,
+  latest.wasm_name,
+  latest.wasm_channel
+FROM contracts c
+LEFT JOIN (
+  SELECT DISTINCT ON (contract_id)
+    contract_id, wasm_name, wasm_version, wasm_channel
+  FROM versions
+  ORDER BY contract_id, version_index DESC
+) latest ON latest.contract_id = c.contract_id;
