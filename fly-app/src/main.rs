@@ -64,6 +64,7 @@ struct WasmDetail {
     #[serde(flatten)]
     row: WasmDetailRow,
     versions: Vec<WasmVersionResult>,
+    meta: String,
 }
 
 /// Slim result for /contracts list endpoint
@@ -272,10 +273,17 @@ async fn fetch_wasm_detail(
             .fetch_all(pool)
             .await;
 
+            // TODO: create `meta`:
+            //
+            // - fetch relevant wasm from archive.wasm_binaries
+            // - parse `contractmetav0` section out
+            // - format that section sensibly (probably not a single `meta` string field lol)
+
             match versions {
                 Ok(v) => HttpResponse::Ok().json(WasmDetail {
                     row: detail_row,
                     versions: v,
+                    meta: String::from("lol"),
                 }),
                 Err(e) => {
                     eprintln!("Database error: {e}");
