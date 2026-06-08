@@ -1,10 +1,5 @@
-# fly.toml app configuration file generated for registry-indexer on 2026-03-04T16:00:52-05:00
-#
-# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
-#
-
 app = 'stellar-registry-testnet'
-primary_region = 'iad'
+primary_region = 'ams'
 
 [build]
 
