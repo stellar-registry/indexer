@@ -2,6 +2,7 @@ use actix_web::{web, App, HttpResponse, HttpServer};
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Executor, PgPool};
+use stellar_xdr::curr::{ScMetaEntry, ScMetaV0};
 
 #[derive(Deserialize)]
 struct QueryParams {
@@ -64,7 +65,17 @@ struct WasmDetail {
     #[serde(flatten)]
     row: WasmDetailRow,
     versions: Vec<WasmVersionResult>,
-    meta: String,
+    meta: Option<WasmMeta>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct WasmMeta {
+    rsver: Option<String>,
+    rssdkver: Option<String>,
+    rssdk_spec_shaking: Option<String>,
+    cliver: Option<String>,
+    source_repo: Option<String>,
+    binver: Option<String>,
 }
 
 /// Slim result for /contracts list endpoint
@@ -226,6 +237,53 @@ async fn get_wasms(pool: web::Data<PgPool>, query: web::Query<QueryParams>) -> H
     }
 }
 
+async fn fetch_wasm_meta(pool: &PgPool, wasm_hash: &str) -> Option<WasmMeta> {
+    let wasm_bytes = sqlx::query_scalar::<_, Vec<u8>>(
+        "SELECT decode(wasm, 'hex') FROM archive.wasm_binaries WHERE wasm_hash = $1",
+    )
+    .bind(wasm_hash)
+    .fetch_optional(pool)
+    .await;
+
+    match wasm_bytes {
+        Ok(Some(bytes)) => {
+            let meta = soroban_meta::read::from_wasm(&bytes);
+            match meta {
+                Ok(entries) => {
+                    let mut obj = serde_json::Map::new();
+                    for entry in entries {
+                        let ScMetaEntry::ScMetaV0(ScMetaV0 { key, val }) = entry;
+                        obj.insert(
+                            key.to_utf8_string_lossy(),
+                            serde_json::Value::String(val.to_utf8_string_lossy()),
+                        );
+                    }
+                    let wasm_meta = match serde_json::from_value::<WasmMeta>(serde_json::Value::Object(obj)) {
+                        Ok(m) => m,
+                        Err(e) => {
+                            eprintln!("Failed to deserialize wasm meta: {e}");
+                            return None;
+                        }
+                    };
+                    return Some(wasm_meta);
+                }
+                Err(e) => {
+                    eprintln!("Failed to read wasm: {e}");
+                    return None;
+                }
+            }
+        }
+        Ok(None) => {
+            eprintln!("No wasm binary for hash: {wasm_hash}");
+            return None;
+        }
+        Err(e) => {
+            eprintln!("Database error: {e}");
+            return None;
+        }
+    }
+}
+
 async fn fetch_wasm_detail(
     pool: &PgPool,
     channel: &str,
@@ -273,17 +331,13 @@ async fn fetch_wasm_detail(
             .fetch_all(pool)
             .await;
 
-            // TODO: create `meta`:
-            //
-            // - fetch relevant wasm from archive.wasm_binaries
-            // - parse `contractmetav0` section out
-            // - format that section sensibly (probably not a single `meta` string field lol)
+            let wasm_meta = fetch_wasm_meta(pool, &detail_row.wasm_hash.clone().unwrap()).await;
 
             match versions {
                 Ok(v) => HttpResponse::Ok().json(WasmDetail {
                     row: detail_row,
                     versions: v,
-                    meta: String::from("lol"),
+                    meta: wasm_meta,
                 }),
                 Err(e) => {
                     eprintln!("Database error: {e}");
