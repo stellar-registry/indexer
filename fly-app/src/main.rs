@@ -3,6 +3,10 @@ use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Executor, PgPool};
 use stellar_xdr::curr::{ScMetaEntry, ScMetaV0};
+use tracing_actix_web::TracingLogger;
+
+use crate::tracing::{init_tracing, RootSpan};
+mod tracing;
 
 #[derive(Deserialize)]
 struct QueryParams {
@@ -229,7 +233,11 @@ async fn get_wasms(pool: web::Data<PgPool>, query: web::Query<QueryParams>) -> H
             HttpResponse::Ok().json(ListResponse { result: rows, next })
         }
         Err(e) => {
-            eprintln!("Database error: {e}");
+            ::tracing::error!(
+                error = %e,
+                operation = "get_wasms",
+                "database query failed"
+            );
             HttpResponse::InternalServerError().json(ErrorResponse {
                 error: "Internal server error".into(),
             })
@@ -258,13 +266,14 @@ async fn fetch_wasm_meta(pool: &PgPool, wasm_hash: &str) -> Option<WasmMeta> {
                             serde_json::Value::String(val.to_utf8_string_lossy()),
                         );
                     }
-                    let wasm_meta = match serde_json::from_value::<WasmMeta>(serde_json::Value::Object(obj)) {
-                        Ok(m) => m,
-                        Err(e) => {
-                            eprintln!("Failed to deserialize wasm meta: {e}");
-                            return None;
-                        }
-                    };
+                    let wasm_meta =
+                        match serde_json::from_value::<WasmMeta>(serde_json::Value::Object(obj)) {
+                            Ok(m) => m,
+                            Err(e) => {
+                                eprintln!("Failed to deserialize wasm meta: {e}");
+                                return None;
+                            }
+                        };
                     return Some(wasm_meta);
                 }
                 Err(e) => {
@@ -278,7 +287,11 @@ async fn fetch_wasm_meta(pool: &PgPool, wasm_hash: &str) -> Option<WasmMeta> {
             return None;
         }
         Err(e) => {
-            eprintln!("Database error: {e}");
+            ::tracing::error!(
+                error = %e,
+                operation = "fetch_wasm_meta",
+                "database query failed"
+            );
             return None;
         }
     }
@@ -331,7 +344,12 @@ async fn fetch_wasm_detail(
             .fetch_all(pool)
             .await;
 
-            let wasm_meta = fetch_wasm_meta(pool, &detail_row.wasm_hash.clone().unwrap()).await;
+            let wasm_meta = if let Some(wasm_hash) = detail_row.wasm_hash.as_deref() {
+                fetch_wasm_meta(pool, wasm_hash).await
+            } else {
+                eprintln!("Missing wasm_hash for wasm_name='{wasm_name}'");
+                None
+            };
 
             match versions {
                 Ok(v) => HttpResponse::Ok().json(WasmDetail {
@@ -340,7 +358,11 @@ async fn fetch_wasm_detail(
                     meta: wasm_meta,
                 }),
                 Err(e) => {
-                    eprintln!("Database error: {e}");
+                    ::tracing::error!(
+                        error = %e,
+                        operation = "fetch_wasm_detail.response",
+                        "database query failed"
+                    );
                     HttpResponse::InternalServerError().json(ErrorResponse {
                         error: "Internal server error".into(),
                     })
@@ -356,7 +378,11 @@ async fn fetch_wasm_detail(
             HttpResponse::NotFound().json(ErrorResponse { error: msg })
         }
         Err(e) => {
-            eprintln!("Database error: {e}");
+            ::tracing::error!(
+                error = %e,
+                operation = "fetch_wasm_detail.detail_row",
+                "database query failed"
+            );
             HttpResponse::InternalServerError().json(ErrorResponse {
                 error: "Internal server error".into(),
             })
@@ -434,7 +460,11 @@ async fn get_contracts_root(
             HttpResponse::Ok().json(ListResponse { result: rows, next })
         }
         Err(e) => {
-            eprintln!("Database error: {e}");
+            ::tracing::error!(
+                error = %e,
+                operation = "get_contracts_root",
+                "database query failed"
+            );
             HttpResponse::InternalServerError().json(ErrorResponse {
                 error: "Internal server error".into(),
             })
@@ -486,7 +516,11 @@ async fn fetch_single_contract(
             });
         }
         Err(e) => {
-            eprintln!("Database error: {e}");
+            ::tracing::error!(
+                error = %e,
+                operation = "fetch_single_contract",
+                "database query failed"
+            );
             return HttpResponse::InternalServerError().json(ErrorResponse {
                 error: "Internal server error".into(),
             });
@@ -503,7 +537,11 @@ async fn fetch_single_contract(
     let versions = match fetch_versions_for_contract_id(&contract_id, pool.get_ref()).await {
         Ok(rows) => rows,
         Err(e) => {
-            eprintln!("Database error: {e}");
+            ::tracing::error!(
+                error = %e,
+                operation = "fetch_single_contract.versions",
+                "database query failed"
+            );
             return HttpResponse::InternalServerError().json(ErrorResponse {
                 error: "Internal server error".into(),
             });
@@ -581,7 +619,11 @@ async fn fetch_single_contract_detail(
             error: format!("Contract '{contract_name}' not found"),
         }),
         Err(e) => {
-            eprintln!("Database error: {e}");
+            ::tracing::error!(
+                error = %e,
+                operation = "fetch_single_contract_detail",
+                "database query failed"
+            );
             HttpResponse::InternalServerError().json(ErrorResponse {
                 error: "Internal server error".into(),
             })
@@ -662,7 +704,11 @@ async fn get_registries(pool: web::Data<PgPool>) -> HttpResponse {
             next: None,
         }),
         Err(e) => {
-            eprintln!("Database error: {e}");
+            ::tracing::error!(
+                error = %e,
+                operation = "get_registries",
+                "database query failed"
+            );
             HttpResponse::InternalServerError().json(ErrorResponse {
                 error: "Internal server error".into(),
             })
@@ -677,7 +723,6 @@ async fn health() -> HttpResponse {
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-
     let pool = PgPoolOptions::new()
         .max_connections(5)
         .after_connect(|conn, _meta| {
@@ -695,10 +740,12 @@ async fn main() -> std::io::Result<()> {
         .parse()
         .expect("PORT must be a valid number");
 
-    println!("Starting server on port {port}");
+    init_tracing();
 
     HttpServer::new(move || {
+        let tracing_middleware = TracingLogger::<RootSpan>::new();
         App::new()
+            .wrap(tracing_middleware)
             .app_data(web::Data::new(pool.clone()))
             .route("/", web::get().to(index))
             .route("/v1", web::get().to(index_v1))
