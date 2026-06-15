@@ -258,12 +258,6 @@ async fn get_wasms(
             } else {
                 None
             };
-            ::tracing::info!(
-                target: "get_wasms.fetch_latest_published_wasms",
-                pool_size = pool.size(),
-                pool_idle = pool.num_idle(),
-            );
-
             HttpResponse::Ok().json(ListResponse { result: rows, next })
         }
         Err(e) => {
