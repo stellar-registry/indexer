@@ -5,7 +5,7 @@ use sqlx::{Executor, PgPool};
 use stellar_xdr::curr::{ScMetaEntry, ScMetaV0};
 use tracing_actix_web::{DefaultRootSpanBuilder, RequestId, TracingLogger};
 
-use crate::tracing::{init_tracing};
+use crate::tracing::init_tracing;
 mod tracing;
 
 #[derive(Deserialize)]
@@ -258,12 +258,6 @@ async fn get_wasms(
             } else {
                 None
             };
-            ::tracing::info!(
-                target: "get_wasms.fetch_latest_published_wasms",
-                pool_size = pool.size(),
-                pool_idle = pool.num_idle(),
-            );
-
             HttpResponse::Ok().json(ListResponse { result: rows, next })
         }
         Err(e) => {
@@ -379,24 +373,25 @@ async fn fetch_wasm_detail(
             .fetch_all(pool)
             .await;
 
-            let wasm_meta = if let Some(wasm_hash) = detail_row.wasm_hash.as_deref() {
-                fetch_wasm_meta(pool, wasm_hash).await
-            } else {
-                ::tracing::warn!(
-                    wasm_name,
-                    channel,
-                    version = ?version,
-                    "missing wasm_hash; returning wasm detail without metadata"
-                );
-                None
-            };
-
             match versions {
-                Ok(v) => HttpResponse::Ok().json(WasmDetail {
-                    row: detail_row,
-                    versions: v,
-                    meta: wasm_meta,
-                }),
+                Ok(v) => {
+                    let wasm_meta = if let Some(wasm_hash) = detail_row.wasm_hash.as_deref() {
+                        fetch_wasm_meta(pool, wasm_hash).await
+                    } else {
+                        ::tracing::warn!(
+                            wasm_name,
+                            channel,
+                            version = ?version,
+                            "missing wasm_hash; returning wasm detail without metadata"
+                        );
+                        None
+                    };
+                    HttpResponse::Ok().json(WasmDetail {
+                        row: detail_row,
+                        versions: v,
+                        meta: wasm_meta,
+                    })
+                }
                 Err(e) => {
                     log_db_error("fetch_wasm_detail.select_wasm_versions", &e, pool);
                     internal_server_error_response(request_id)
@@ -424,14 +419,7 @@ async fn get_wasm_root_channel(
     request_id: RequestId,
 ) -> HttpResponse {
     let wasm_name = path.into_inner();
-    fetch_wasm_detail(
-        pool.get_ref(),
-        "root",
-        &wasm_name,
-        None,
-        request_id,
-    )
-    .await
+    fetch_wasm_detail(pool.get_ref(), "root", &wasm_name, None, request_id).await
 }
 
 async fn get_wasm_latest(
@@ -440,14 +428,7 @@ async fn get_wasm_latest(
     request_id: RequestId,
 ) -> HttpResponse {
     let (channel, wasm_name) = path.into_inner();
-    fetch_wasm_detail(
-        pool.get_ref(),
-        &channel,
-        &wasm_name,
-        None,
-        request_id,
-    )
-    .await
+    fetch_wasm_detail(pool.get_ref(), &channel, &wasm_name, None, request_id).await
 }
 
 async fn get_wasm_version_root(
