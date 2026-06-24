@@ -10,6 +10,7 @@ mod tracing;
 
 #[derive(Deserialize)]
 struct QueryParams {
+    query: Option<String>,
     limit: Option<i64>,
     cursor: Option<String>,
 }
@@ -242,12 +243,14 @@ async fn get_wasms(
         "SELECT id, author, wasm_version, wasm_name, wasm_hash, channel \
          FROM v1.latest_published_wasms \
          WHERE (ledger_sequence, id) >= ($1, $2) \
+            AND ($4::text IS NULL OR search_vector @@ websearch_to_tsquery('english', $4))
          ORDER BY ledger_sequence, id ASC \
          LIMIT $3",
     )
     .bind(ledger)
     .bind(&cursor)
     .bind(limit)
+    .bind(query.query.as_deref())
     .fetch_all(pool.get_ref())
     .await;
 
