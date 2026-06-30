@@ -10,6 +10,7 @@ mod tracing;
 
 #[derive(Deserialize)]
 struct QueryParams {
+    query: Option<String>,
     limit: Option<i64>,
     cursor: Option<String>,
 }
@@ -239,15 +240,32 @@ async fn get_wasms(
     };
 
     let rows = sqlx::query_as::<_, WasmResult>(
-        "SELECT id, author, wasm_version, wasm_name, wasm_hash, channel \
+        "SELECT id, author, wasm_version, wasm_name, wasm_hash, channel, \
+                CASE \
+                    WHEN $4::text IS NULL THEN 0 \
+                    ELSE GREATEST( \
+                        v1.similarity(wasm_name, $4), \
+                        v1.similarity(channel, $4), \
+                        CASE WHEN wasm_hash = $4 THEN 1.0 ELSE 0.0 END, \
+                        CASE WHEN author = $4 THEN 1.0 ELSE 0.0 END \
+                    ) \
+                END AS rank \
          FROM v1.latest_published_wasms \
          WHERE (ledger_sequence, id) >= ($1, $2) \
-         ORDER BY ledger_sequence, id ASC \
+            AND (
+                $4::text IS NULL \
+                OR (v1.similarity(wasm_name, $4) > 0.2 \
+                OR wasm_hash = $4 \
+                OR author = $4 \
+                OR v1.similarity(channel, $4) > 0.2 ) \
+                ) \
+         ORDER BY rank DESC, ledger_sequence, id ASC \
          LIMIT $3",
     )
     .bind(ledger)
     .bind(&cursor)
     .bind(limit)
+    .bind(query.query.as_deref())
     .fetch_all(pool.get_ref())
     .await;
 
