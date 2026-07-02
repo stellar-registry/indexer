@@ -19,6 +19,9 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 -- create trigram index on wasm_name
 CREATE INDEX wasm_name_trgm_idx_published_wasms ON published_wasms USING GIN (wasm_name gin_trgm_ops);
 
+-- create trigram index on contract_name
+CREATE INDEX contract_name_trgm_idx_registered_contracts ON registered_contracts USING GIN (contract_name gin_trgm_ops);
+
 -- Channel views: translate emitter_contract_id → friendly channel name
 -- via the registries table.
 

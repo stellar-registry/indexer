@@ -500,15 +500,36 @@ async fn get_contracts_root(
 
     let rows = sqlx::query_as::<_, ContractResult>(
         "SELECT id, contract_id, channel, contract_name, sac, deployer, \
-                wasm_version, wasm_name, wasm_channel \
+                wasm_version, wasm_name, wasm_channel, \
+                CASE \
+                    WHEN $4::text IS NULL THEN 0 \
+                    ELSE GREATEST( \
+                        v1.similarity(contract_name, $4), \
+                        v1.similarity(wasm_channel, $4), \
+                        v1.similarity(wasm_name, $4), \
+                        v1.similarity(channel, $4), \
+                        CASE WHEN deployer = $4 THEN 1.0 ELSE 0.0 END \
+                    ) \
+                END AS rank \
          FROM v1.contracts_enriched \
          WHERE (ledger_sequence, id) >= ($1, $2) \
-         ORDER BY ledger_sequence, id ASC \
+            AND (
+                $4::text IS NULL \
+                OR ( \
+                    v1.similarity(contract_name, $4) > 0.2 \
+                    OR v1.similarity(wasm_channel, $4) > 0.2  \
+                    OR v1.similarity(wasm_name, $4) > 0.2  \
+                    OR v1.similarity(channel, $4) > 0.2  \
+                    OR deployer = $4 \
+                    )\
+                ) \
+         ORDER BY rank DESC, ledger_sequence, id ASC \
          LIMIT $3",
     )
     .bind(ledger)
     .bind(&cursor)
     .bind(limit)
+    .bind(query.query.as_deref())
     .fetch_all(pool.get_ref())
     .await;
 
