@@ -6,7 +6,9 @@ use sqlx::PgPool;
 use stellar_xdr::curr::{ScMetaEntry, ScMetaV0};
 use tracing_actix_web::{DefaultRootSpanBuilder, RequestId, TracingLogger};
 
+use crate::error::{ErrorResponse, InternalErrorResponse};
 use crate::tracing::init_tracing;
+mod error;
 mod tracing;
 mod util;
 
@@ -194,18 +196,6 @@ pub fn serialize_raw<S: serde::Serializer>(val: &Option<String>, s: S) -> Result
 struct ListResponse<T: Serialize> {
     result: Vec<T>,
     next: Option<String>,
-}
-
-#[derive(Serialize)]
-struct ErrorResponse {
-    error: String,
-}
-
-#[derive(Serialize)]
-struct InternalErrorResponse {
-    error: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    request_id: Option<String>,
 }
 
 fn internal_server_error_response(request_id: RequestId) -> HttpResponse {

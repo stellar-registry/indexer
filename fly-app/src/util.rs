@@ -1,10 +1,5 @@
+use crate::error::ErrorResponse;
 use actix_web::HttpResponse;
-use serde::Serialize;
-
-#[derive(Serialize)]
-struct ErrorResponse {
-    error: String,
-}
 
 pub fn build_sort_spec(
     sort_by: Vec<String>,
