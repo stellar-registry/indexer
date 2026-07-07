@@ -168,9 +168,18 @@ if [[ -n "$EXPECTED_SUBREGISTRIES" ]]; then
 fi
 echo ""
 
-# 1. Stop (pause) the pipeline
+# 1. Stop (pause) the pipeline. A "not found" failure means the
+#    pipeline has never been applied — first deploy — so there is
+#    nothing to pause (or drop) and we proceed straight to apply.
 echo "==> pausing pipeline..."
-"$TURBO" pause "$PIPELINE_NAME"
+if pause_out=$("$TURBO" pause "$PIPELINE_NAME" 2>&1); then
+  printf '%s\n' "$pause_out"
+elif grep -qi "not found" <<<"$pause_out"; then
+  echo "==> pipeline '$PIPELINE_NAME' not deployed yet — first deploy, skipping pause"
+else
+  printf '%s\n' "$pause_out" >&2
+  exit 1
+fi
 echo ""
 
 # 2. Drop tables
