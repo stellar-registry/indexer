@@ -26,10 +26,10 @@
 #      something is wrong beyond the known race (e.g. pipeline
 #      definition bug, emitters missing from v1.registries).
 #
-# Usage:
-#   DATABASE_URL="postgres://..." ./goldsky/scripts/redeploy.sh goldsky/v1
+# Usage (render first: ./goldsky/scripts/render.sh <network>):
+#   DATABASE_URL="postgres://..." ./goldsky/scripts/redeploy.sh goldsky/rendered/testnet/v1
 #   DATABASE_URL="postgres://..." ./goldsky/scripts/redeploy.sh \
-#       --number-of-initial-subregistries 7 goldsky/v1
+#       --number-of-initial-subregistries 7 goldsky/rendered/testnet/v1
 #
 # The positional argument is a directory containing:
 #   - index.yaml      (required) Goldsky pipeline definition

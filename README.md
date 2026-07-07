@@ -4,8 +4,35 @@ It explores 2 approaches: Goldsky filtering + AWS lambda fetching, and AWS lambd
 Both approaches use Goldsky to fetch initial data.
 Both approaches use AWS lambda to serve data to a client.
 
+## Per-network configuration (testnet & mainnet)
+Goldsky pipeline definitions are checked in as templates
+(`goldsky/v1/index.template.yaml`, `goldsky/archive/index.template.yaml`)
+with `${VAR}` placeholders. Per-network values (dataset prefix, start
+ledger, root registry contract, hosted-Postgres secret name) live in
+`goldsky/networks/<network>.env`. Render concrete pipeline definitions
+with:
+
+```sh
+./goldsky/scripts/render.sh testnet   # or: mainnet
+```
+
+which writes self-contained pipeline dirs under `goldsky/rendered/<network>/`
+(gitignored — regenerate, never edit). All other scripts take those
+rendered dirs:
+
+```sh
+DATABASE_URL=... ./goldsky/scripts/redeploy.sh --number-of-initial-subregistries 7 goldsky/rendered/testnet/v1
+DATABASE_URL=... ./goldsky/scripts/redeploy.sh goldsky/rendered/testnet/archive
+```
+
+Each network must use its own Postgres database (pipelines write to the
+fixed `v1`/`archive` schemas, so sharing a database would collide) and
+its own Fly app for the HTTP API: `fly-app/fly.toml` is the testnet app,
+`fly-app/fly.mainnet.toml` the mainnet one
+(`fly deploy -c fly.mainnet.toml`).
+
 ## Goldsky-first approach
-Goldsky-first approach uses `goldsky/v1/index.yaml` configuration file as Goldsky pipeline configuration. 
+Goldsky-first approach uses the rendered `goldsky/rendered/<network>/v1/index.yaml` configuration file as Goldsky pipeline configuration. 
 It first filters all events that belong to registry contract, then stores raw events (as a backup data).
 Finally, deploy/publish event JSONs are being parsed via SQL transformer and pushed into Postgres.
 Note: if there are any migration or changes in the events schema, events would need to be re-processed 

@@ -1,11 +1,11 @@
-name: contract-lifecycle-mainnet
+name: contract-lifecycle-${NETWORK}
 resource_size: s
 use_dedicated_ip: false
 job: false
 # ─────────────────────────────────────────────────────────────────────────────
 # SOURCES
 #
-# stellar_mainnet.ledger_entries carries every ledger-entry state change.
+# ${DATASET_PREFIX}.ledger_entries carries every ledger-entry state change.
 # We use it to detect:
 #   - wasm uploads      → ContractCode entries with change_type=created
 #   - contract deploys  → ContractData entries with change_type=created
@@ -13,10 +13,10 @@ job: false
 #
 # This source captures both top-level CreateContract operations AND
 # factory-pattern deploys (a contract calling create_contract via
-# sub-invocation), which the stellar_mainnet.operations dataset misses
+# sub-invocation), which the ${DATASET_PREFIX}.operations dataset misses
 # because sub-invocation creates don't appear as top-level operations.
 #
-# stellar_mainnet.events carries system events. We consume only the
+# ${DATASET_PREFIX}.events carries system events. We consume only the
 # `executable_update` event for upgrade tracking. The Soroban host does
 # not emit any event on initial deploy, so deploys come exclusively from
 # the ledger_entries source above.
@@ -24,15 +24,15 @@ job: false
 sources:
     stellar_ledger_entries:
         type: dataset
-        dataset_name: stellar_mainnet.ledger_entries
+        dataset_name: ${DATASET_PREFIX}.ledger_entries
         version: 1.2.0
-        start_at: 63359485
+        start_at: ${ARCHIVE_START_AT}
 
     stellar_events:
         type: dataset
-        dataset_name: stellar_mainnet.events
+        dataset_name: ${DATASET_PREFIX}.events
         version: 1.2.0
-        start_at: 63359485
+        start_at: ${ARCHIVE_START_AT}
 
 transforms:
     # Wasm upload metadata. ContractCode entries are keyed by their
@@ -123,27 +123,27 @@ sinks:
     uploads_pg:
         from: wasm_uploads
         schema: archive
-        secret_name: HOSTED_POSTGRES_MAINNET_TODO
+        secret_name: ${PG_SECRET_NAME}
         table: uploads
         type: postgres
 
     wasm_binaries_pg:
         from: wasm_binaries
         schema: archive
-        secret_name: HOSTED_POSTGRES_MAINNET_TODO
+        secret_name: ${PG_SECRET_NAME}
         table: wasm_binaries
         type: postgres
 
     deploys_pg:
         from: contract_deploys
         schema: archive
-        secret_name: HOSTED_POSTGRES_MAINNET_TODO
+        secret_name: ${PG_SECRET_NAME}
         table: deploys
         type: postgres
 
     upgrades_pg:
         from: upgrade_events
         schema: archive
-        secret_name: HOSTED_POSTGRES_MAINNET_TODO
+        secret_name: ${PG_SECRET_NAME}
         table: upgrades
         type: postgres

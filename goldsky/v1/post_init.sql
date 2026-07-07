@@ -8,7 +8,7 @@
 -- under a different search_path).
 --
 -- Cross-schema references stay explicit: archive.* lives in its own
--- schema (see goldsky/archive/index.yaml) and must not be hidden by
+-- schema (see goldsky/archive/index.template.yaml) and must not be hidden by
 -- search_path resolution.
 
 SET search_path TO v1;
