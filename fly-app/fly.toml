@@ -1,4 +1,4 @@
-app = 'stellar-registry-testnet'
+app = 'stellar-registry-mainnet'
 primary_region = 'ams'
 
 [build]

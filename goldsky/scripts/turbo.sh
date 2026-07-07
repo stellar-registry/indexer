@@ -5,7 +5,7 @@
 # Usage:
 #   ./goldsky/scripts/turbo.sh validate goldsky/v1/index.yaml
 #   ./goldsky/scripts/turbo.sh apply goldsky/v1/index.yaml
-#   ./goldsky/scripts/turbo.sh stop registry-testnet-v1
+#   ./goldsky/scripts/turbo.sh stop registry-mainnet-v1
 #   ./goldsky/scripts/turbo.sh list
 
 set -euo pipefail
