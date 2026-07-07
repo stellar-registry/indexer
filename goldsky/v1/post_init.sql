@@ -17,7 +17,7 @@ SET search_path TO v1;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 -- create trigram index on wasm_name
-CREATE INDEX wasm_name_trgm_idx_published_wasms ON published_wasms USING GIN (wasm_name gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS wasm_name_trgm_idx_published_wasms ON published_wasms USING GIN (wasm_name gin_trgm_ops);
 
 -- Channel views: translate emitter_contract_id → friendly channel name
 -- via the registries table.

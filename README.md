@@ -18,11 +18,14 @@ with:
 
 which writes self-contained pipeline dirs under `goldsky/rendered/<network>/`
 (gitignored — regenerate, never edit). All other scripts take those
-rendered dirs:
+rendered dirs. Deploy the **archive pipeline first**: the v1 pipeline's
+`post_init.sql` creates views over `archive.uploads` / `archive.deploys` /
+`archive.upgrades`, so on a fresh database it can only succeed once the
+archive pipeline has created those tables.
 
 ```sh
-DATABASE_URL=... ./goldsky/scripts/redeploy.sh --number-of-initial-subregistries 7 goldsky/rendered/testnet/v1
 DATABASE_URL=... ./goldsky/scripts/redeploy.sh goldsky/rendered/testnet/archive
+DATABASE_URL=... ./goldsky/scripts/redeploy.sh --number-of-initial-subregistries 7 goldsky/rendered/testnet/v1
 ```
 
 Each network must use its own Postgres database (pipelines write to the
