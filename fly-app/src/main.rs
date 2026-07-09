@@ -259,27 +259,17 @@ async fn get_wasms(
         ",
     );
 
-    let sort_spec = util::build_sort_spec(sort_by, descending, &["wasm_name", "channel", "author"]);
-    match sort_spec {
-        Ok(sort_stmt) => {
-            if sort_stmt != "" {
-                statement.push_str(&sort_stmt);
-            } else {
-                statement.push_str("ORDER BY rank DESC, ledger_sequence, id ASC\n");
-            }
-        }
-        Err(e) => return e,
-    let sort_stmt = match util::build_sort_spec(sort_by, descending, &["wasm_name", "channel", "author"]) {
-        Ok(s) => s,
-        Err(e) => return e,
-    };
+    let sort_stmt =
+        match util::build_sort_spec(sort_by, descending, &["wasm_name", "channel", "author"]) {
+            Ok(s) => s,
+            Err(e) => return e,
+        };
 
     if sort_stmt.is_empty() {
         statement.push_str("ORDER BY rank DESC, ledger_sequence, id ASC\n");
     } else {
         statement.push_str(&sort_stmt);
     }
-
 
     statement.push_str("LIMIT $3");
 
@@ -551,7 +541,7 @@ async fn get_contracts_root(
         ",
     );
 
-    let sort_spec = util::build_sort_spec(
+    let sort_stmt = match util::build_sort_spec(
         sort_by,
         descending,
         &[
@@ -561,17 +551,15 @@ async fn get_contracts_root(
             "wasm_name",
             "deployer",
         ],
-    );
-
-    match sort_spec {
-        Ok(sort_stmt) => {
-            if sort_stmt != "" {
-                statement.push_str(&sort_stmt);
-            } else {
-                statement.push_str("ORDER BY rank DESC, ledger_sequence, id ASC");
-            }
-        }
+    ) {
+        Ok(s) => s,
         Err(e) => return e,
+    };
+
+    if sort_stmt.is_empty() {
+        statement.push_str("ORDER BY rank DESC, ledger_sequence, id ASC");
+    } else {
+        statement.push_str(&sort_stmt);
     }
 
     statement.push_str("LIMIT $3");
