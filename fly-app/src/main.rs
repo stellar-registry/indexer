@@ -269,7 +269,17 @@ async fn get_wasms(
             }
         }
         Err(e) => return e,
+    let sort_stmt = match util::build_sort_spec(sort_by, descending, &["wasm_name", "channel", "author"]) {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+
+    if sort_stmt.is_empty() {
+        statement.push_str("ORDER BY rank DESC, ledger_sequence, id ASC\n");
+    } else {
+        statement.push_str(&sort_stmt);
     }
+
 
     statement.push_str("LIMIT $3");
 
