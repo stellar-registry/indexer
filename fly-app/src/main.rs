@@ -269,11 +269,8 @@ async fn get_wasms(
     if !sort_stmt.is_empty() {
         statement.push_str(&sort_stmt);
         statement.push_str(", ");
-    } else {
-        statement.push_str("rank DESC, ");
     }
-    statement.push_str("ledger_sequence, id ASC\n");
-
+    statement.push_str("rank DESC, ledger_sequence, id ASC\n");
     statement.push_str("LIMIT $3");
 
     let rows = sqlx::query_as::<_, WasmResult>(&statement)
@@ -563,11 +560,8 @@ async fn get_contracts_root(
     if !sort_stmt.is_empty() {
         statement.push_str(&sort_stmt);
         statement.push_str(", ");
-    } else {
-        statement.push_str("rank DESC, ");
     }
-    statement.push_str("ledger_sequence, id ASC\n");
-
+    statement.push_str("rank DESC, ledger_sequence, id ASC\n");
     statement.push_str("LIMIT $3");
 
     let rows = sqlx::query_as::<_, ContractResult>(&statement)
