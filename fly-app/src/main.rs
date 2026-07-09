@@ -256,6 +256,7 @@ async fn get_wasms(
                 OR author = $4 \
                 OR v1.similarity(channel, $4) > 0.2 ) \
                 ) \
+         ORDER BY \
         ",
     );
 
@@ -265,11 +266,13 @@ async fn get_wasms(
             Err(e) => return e,
         };
 
-    if sort_stmt.is_empty() {
-        statement.push_str("ORDER BY rank DESC, ledger_sequence, id ASC\n");
-    } else {
+    if !sort_stmt.is_empty() {
         statement.push_str(&sort_stmt);
+        statement.push_str(", ");
+    } else {
+        statement.push_str("rank DESC, ");
     }
+    statement.push_str("ledger_sequence, id ASC\n");
 
     statement.push_str("LIMIT $3");
 
@@ -538,6 +541,7 @@ async fn get_contracts_root(
                     OR deployer = $4 \
                     )\
                 ) \
+         ORDER BY \
         ",
     );
 
@@ -556,11 +560,13 @@ async fn get_contracts_root(
         Err(e) => return e,
     };
 
-    if sort_stmt.is_empty() {
-        statement.push_str("ORDER BY rank DESC, ledger_sequence, id ASC");
-    } else {
+    if !sort_stmt.is_empty() {
         statement.push_str(&sort_stmt);
+        statement.push_str(", ");
+    } else {
+        statement.push_str("rank DESC, ");
     }
+    statement.push_str("ledger_sequence, id ASC\n");
 
     statement.push_str("LIMIT $3");
 

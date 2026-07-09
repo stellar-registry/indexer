@@ -35,5 +35,5 @@ pub fn build_sort_spec(
         return Ok(String::new());
     }
 
-    Ok(format!("ORDER BY {}\n", clauses.join(", ")))
+    Ok(clauses.join(", "))
 }
