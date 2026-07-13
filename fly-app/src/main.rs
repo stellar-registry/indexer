@@ -1,18 +1,24 @@
 use actix_web::{web, App, HttpResponse, HttpServer};
 use serde::{Deserialize, Serialize};
+use serde_qs::actix::QsQuery;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use stellar_xdr::curr::{ScMetaEntry, ScMetaV0};
 use tracing_actix_web::{DefaultRootSpanBuilder, RequestId, TracingLogger};
 
+use crate::error::{ErrorResponse, InternalErrorResponse};
 use crate::tracing::init_tracing;
+mod error;
 mod tracing;
+mod util;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct QueryParams {
     query: Option<String>,
     limit: Option<i64>,
     cursor: Option<String>,
+    sort_by: Option<Vec<String>>,
+    descending: Option<Vec<bool>>,
 }
 
 /// Slim result for /wasms list endpoint
@@ -192,18 +198,6 @@ struct ListResponse<T: Serialize> {
     next: Option<String>,
 }
 
-#[derive(Serialize)]
-struct ErrorResponse {
-    error: String,
-}
-
-#[derive(Serialize)]
-struct InternalErrorResponse {
-    error: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    request_id: Option<String>,
-}
-
 fn internal_server_error_response(request_id: RequestId) -> HttpResponse {
     HttpResponse::InternalServerError().json(InternalErrorResponse {
         error: "Internal server error".into(),
@@ -224,9 +218,12 @@ fn log_db_error(operation: &'static str, error: &sqlx::Error, pool: &PgPool) {
 
 async fn get_wasms(
     pool: web::Data<PgPool>,
-    query: web::Query<QueryParams>,
+    query: QsQuery<QueryParams>,
     request_id: RequestId,
 ) -> HttpResponse {
+    let sort_by: Vec<String> = query.sort_by.clone().unwrap_or(Vec::new());
+    let descending: Vec<bool> = query.descending.clone().unwrap_or(Vec::new());
+
     let limit = query.limit.unwrap_or(200);
     if limit < 1 || limit > 200 {
         return HttpResponse::BadRequest().json(ErrorResponse {
@@ -239,7 +236,7 @@ async fn get_wasms(
         Err(resp) => return resp,
     };
 
-    let rows = sqlx::query_as::<_, WasmResult>(
+    let mut statement = String::from(
         "SELECT id, author, wasm_version, wasm_name, wasm_hash, channel, \
                 CASE \
                     WHEN $4::text IS NULL THEN 0 \
@@ -259,15 +256,30 @@ async fn get_wasms(
                 OR author = $4 \
                 OR v1.similarity(channel, $4) > 0.2 ) \
                 ) \
-         ORDER BY rank DESC, ledger_sequence, id ASC \
-         LIMIT $3",
-    )
-    .bind(ledger)
-    .bind(&cursor)
-    .bind(limit)
-    .bind(query.query.as_deref())
-    .fetch_all(pool.get_ref())
-    .await;
+         ORDER BY \
+        ",
+    );
+
+    let sort_stmt =
+        match util::build_sort_spec(sort_by, descending, &["wasm_name", "channel", "author"]) {
+            Ok(s) => s,
+            Err(e) => return e,
+        };
+
+    if !sort_stmt.is_empty() {
+        statement.push_str(&sort_stmt);
+        statement.push_str(", ");
+    }
+    statement.push_str("rank DESC, ledger_sequence, id ASC\n");
+    statement.push_str("LIMIT $3");
+
+    let rows = sqlx::query_as::<_, WasmResult>(&statement)
+        .bind(ledger)
+        .bind(&cursor)
+        .bind(limit)
+        .bind(query.query.as_deref())
+        .fetch_all(pool.get_ref())
+        .await;
 
     match rows {
         Ok(rows) => {
@@ -483,10 +495,13 @@ async fn get_wasm_version(
 
 async fn get_contracts_root(
     pool: web::Data<PgPool>,
-    query: web::Query<QueryParams>,
+    query: QsQuery<QueryParams>,
     request_id: RequestId,
 ) -> HttpResponse {
+    let sort_by: Vec<String> = query.sort_by.clone().unwrap_or(Vec::new());
+    let descending: Vec<bool> = query.descending.clone().unwrap_or(Vec::new());
     let limit = query.limit.unwrap_or(200);
+
     if limit < 1 || limit > 200 {
         return HttpResponse::BadRequest().json(ErrorResponse {
             error: "Limit must be an integer between 1 and 200".into(),
@@ -498,19 +513,64 @@ async fn get_contracts_root(
         Err(resp) => return resp,
     };
 
-    let rows = sqlx::query_as::<_, ContractResult>(
+    let mut statement = String::from(
         "SELECT id, contract_id, channel, contract_name, sac, deployer, \
-                wasm_version, wasm_name, wasm_channel \
+                wasm_version, wasm_name, wasm_channel, \
+                CASE \
+                    WHEN $4::text IS NULL THEN 0 \
+                    ELSE GREATEST( \
+                        v1.similarity(contract_name, $4), \
+                        v1.similarity(wasm_channel, $4), \
+                        v1.similarity(wasm_name, $4), \
+                        v1.similarity(channel, $4), \
+                        CASE WHEN deployer = $4 THEN 1.0 ELSE 0.0 END \
+                    ) \
+                END AS rank \
          FROM v1.contracts_enriched \
          WHERE (ledger_sequence, id) >= ($1, $2) \
-         ORDER BY ledger_sequence, id ASC \
-         LIMIT $3",
-    )
-    .bind(ledger)
-    .bind(&cursor)
-    .bind(limit)
-    .fetch_all(pool.get_ref())
-    .await;
+            AND (
+                $4::text IS NULL \
+                OR ( \
+                    v1.similarity(contract_name, $4) > 0.2 \
+                    OR v1.similarity(wasm_channel, $4) > 0.2  \
+                    OR v1.similarity(wasm_name, $4) > 0.2  \
+                    OR v1.similarity(channel, $4) > 0.2  \
+                    OR deployer = $4 \
+                    )\
+                ) \
+         ORDER BY \
+        ",
+    );
+
+    let sort_stmt = match util::build_sort_spec(
+        sort_by,
+        descending,
+        &[
+            "contract_id",
+            "channel",
+            "contract_name",
+            "wasm_name",
+            "deployer",
+        ],
+    ) {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+
+    if !sort_stmt.is_empty() {
+        statement.push_str(&sort_stmt);
+        statement.push_str(", ");
+    }
+    statement.push_str("rank DESC, ledger_sequence, id ASC\n");
+    statement.push_str("LIMIT $3");
+
+    let rows = sqlx::query_as::<_, ContractResult>(&statement)
+        .bind(ledger)
+        .bind(&cursor)
+        .bind(limit)
+        .bind(query.query.as_deref())
+        .fetch_all(pool.get_ref())
+        .await;
 
     match rows {
         Ok(rows) => {
