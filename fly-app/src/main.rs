@@ -1,3 +1,4 @@
+use actix_governor::{Governor, GovernorConfigBuilder};
 use actix_web::{web, App, HttpResponse, HttpServer};
 use serde::{Deserialize, Serialize};
 use serde_qs::actix::QsQuery;
@@ -843,6 +844,12 @@ async fn main() -> std::io::Result<()> {
         .parse()
         .expect("PORT must be a valid number");
 
+    let governor_conf = GovernorConfigBuilder::default()
+        .seconds_per_request(2)
+        .burst_size(5)
+        .finish()
+        .unwrap();
+
     init_tracing();
 
     ::tracing::info!(
@@ -858,37 +865,41 @@ async fn main() -> std::io::Result<()> {
             .wrap(tracing_middleware)
             .app_data(web::Data::new(pool.clone()))
             .route("/", web::get().to(index))
-            .route("/v1", web::get().to(index_v1))
-            .route("/v1/wasms", web::get().to(get_wasms))
-            .route(
-                "/v1/wasms/{wasm_name}",
-                web::get().to(get_wasm_root_channel),
-            )
-            .route(
-                "/v1/wasms/{channel}/{wasm_name}",
-                web::get().to(get_wasm_latest),
-            )
-            .route(
-                "/v1/wasms/{wasm_name}/v/{version}",
-                web::get().to(get_wasm_version_root),
-            )
-            .route(
-                "/v1/wasms/{channel}/{wasm_name}/v/{version}",
-                web::get().to(get_wasm_version),
-            )
-            .route("/v1/registries", web::get().to(get_registries))
-            .route("/v1/contracts", web::get().to(get_contracts_root))
-            .route(
-                "/v1/contract_deploy_details/{channel}/{contract_name}",
-                web::get().to(get_contract_deploy_detail),
-            )
-            .route(
-                "/v1/contracts/{contract_name}",
-                web::get().to(get_single_contract_root),
-            )
-            .route(
-                "/v1/contracts/{channel}/{contract_name}",
-                web::get().to(get_single_contract),
+            .service(
+                web::scope("/v1")
+                    .wrap(Governor::new(&governor_conf))
+                    .route("", web::get().to(index_v1))
+                    .route("/wasms", web::get().to(get_wasms))
+                    .route(
+                        "/wasms/{wasm_name}",
+                        web::get().to(get_wasm_root_channel),
+                    )
+                    .route(
+                        "/wasms/{channel}/{wasm_name}",
+                        web::get().to(get_wasm_latest),
+                    )
+                    .route(
+                        "/wasms/{wasm_name}/v/{version}",
+                        web::get().to(get_wasm_version_root),
+                    )
+                    .route(
+                        "/wasms/{channel}/{wasm_name}/v/{version}",
+                        web::get().to(get_wasm_version),
+                    )
+                    .route("/registries", web::get().to(get_registries))
+                    .route("/contracts", web::get().to(get_contracts_root))
+                    .route(
+                        "/contract_deploy_details/{channel}/{contract_name}",
+                        web::get().to(get_contract_deploy_detail),
+                    )
+                    .route(
+                        "/contracts/{contract_name}",
+                        web::get().to(get_single_contract_root),
+                    )
+                    .route(
+                        "/contracts/{channel}/{contract_name}",
+                        web::get().to(get_single_contract),
+                    ),
             )
             .route("/health", web::get().to(health))
     })
