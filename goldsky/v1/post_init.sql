@@ -17,10 +17,10 @@ SET search_path TO v1;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 -- create trigram index on wasm_name
-CREATE INDEX wasm_name_trgm_idx_published_wasms ON published_wasms USING GIN (wasm_name gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS wasm_name_trgm_idx_published_wasms ON published_wasms USING GIN (wasm_name gin_trgm_ops);
 
 -- create trigram index on contract_name
-CREATE INDEX contract_name_trgm_idx_registered_contracts ON registered_contracts USING GIN (contract_name gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS contract_name_trgm_idx_registered_contracts ON registered_contracts USING GIN (contract_name gin_trgm_ops);
 
 -- Channel views: translate emitter_contract_id → friendly channel name
 -- via the registries table.
@@ -208,3 +208,12 @@ LEFT JOIN (
   FROM versions
   ORDER BY contract_id, version_index DESC
 ) latest ON latest.contract_id = c.contract_id;
+
+-- used to store details extracted from wasm binaries
+-- of registered contracts
+CREATE TABLE IF NOT EXISTS registered_wasm_details (
+  wasm_hash text NOT NULL PRIMARY KEY,
+  contract_spec JSONB,
+  contract_meta JSONB,
+  ledger_sequence int8
+)
