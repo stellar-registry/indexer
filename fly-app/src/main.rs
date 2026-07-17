@@ -7,11 +7,12 @@ use stellar_xdr::curr::{ScMetaEntry, ScMetaV0};
 use tracing_actix_web::{DefaultRootSpanBuilder, RequestId, TracingLogger};
 
 use crate::error::{ErrorResponse, InternalErrorResponse};
+use crate::tasks::{extract_wasm_details, wasm_details_task};
 use crate::tracing::init_tracing;
 mod error;
+mod tasks;
 mod tracing;
 mod util;
-mod tasks;
 
 #[derive(Deserialize, Debug)]
 struct QueryParams {
@@ -890,6 +891,10 @@ async fn main() -> std::io::Result<()> {
             .route(
                 "/v1/contracts/{channel}/{contract_name}",
                 web::get().to(get_single_contract),
+            )
+            .route(
+                "/v1/webhooks/wasm-details",
+                web::post().to(wasm_details_task),
             )
             .route("/health", web::get().to(health))
     })

@@ -1,3 +1,4 @@
+use actix_web::{HttpResponse, web};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use stellar_xdr::curr::{ScMetaEntry, ScMetaV0, ScSpecEntry, ScSpecTypeDef};
@@ -14,6 +15,11 @@ struct FunctionInput {
 pub struct FunctionSpec {
     doc: Option<String>,        // None if empty
     inputs: Vec<FunctionInput>, // (arg_name, arg_type)
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct WasmDetailPayload {
+    wasm_hash: String,
 }
 
 fn parse_wasm_meta(
@@ -73,12 +79,12 @@ fn parse_wasm_spec(
     }
 }
 
-pub async fn extract_wasm_details(pool: &PgPool, wasm_hash: &str) {
+async fn extract_wasm_details(wasm_hash: &str, pool: web::Data<PgPool>) {
     let wasm_bytes = sqlx::query_scalar::<_, Vec<u8>>(
         "SELECT decode(wasm, 'hex') FROM archive.wasm_binaries WHERE wasm_hash = $1",
     )
-    .bind(wasm_hash)
-    .fetch_optional(pool)
+    .bind(&wasm_hash)
+    .fetch_optional(pool.get_ref())
     .await;
 
     match wasm_bytes {
@@ -89,4 +95,19 @@ pub async fn extract_wasm_details(pool: &PgPool, wasm_hash: &str) {
         Ok(None) => {}
         Err(e) => {}
     }
+}
+
+pub async fn wasm_details_task(
+    payload: actix_web::web::Json<WasmDetailPayload>,
+    pool: web::Data<PgPool>,
+) -> HttpResponse {
+    let wasm_hash = payload.wasm_hash.clone();
+    // spawn requires it to be 'static because it might outlive the task, cloning it will make the
+    // spawned task own a PgPool.
+    let pool = pool.clone();
+    let _handle = actix_web::rt::spawn(async move {
+        extract_wasm_details(wasm_hash.as_str(), pool).await;
+    });
+
+    HttpResponse::Ok().finish()
 }
