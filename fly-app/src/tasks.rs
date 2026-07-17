@@ -70,10 +70,18 @@ fn parse_wasm_spec(
                         })
                         .collect(),
                 };
-                obj.insert(
-                    "constructor".to_string(),
-                    serde_json::to_value(spec).unwrap(),
-                );
+                match serde_json::to_value(spec) {
+                    Ok(spec_json) => {
+                        obj.insert("__constructor".to_string(), spec_json);
+                    }
+                    Err(e) => {
+                        ::tracing::warn!(
+                            error = %e,
+                            error_debug = ?e,
+                            "failed to serialize constructor spec"
+                        );
+                    }
+                }
             });
             return Ok(obj);
         }
@@ -83,43 +91,98 @@ fn parse_wasm_spec(
 
 async fn extract_wasm_details(wasm_hash: &str, pool: web::Data<PgPool>) {
     let is_extracted = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM registered_wasm_details WHERE wasm_hash = $1)",
+        "SELECT EXISTS(SELECT 1 FROM v1.registered_wasm_details WHERE wasm_hash = $1)",
     )
-    .bind(&wasm_hash)
-    .fetch_optional(pool.get_ref())
+    .bind(wasm_hash)
+    .fetch_one(pool.get_ref())
     .await;
+
     match is_extracted {
-        Ok(Some(result)) => {
-            if result == true {
-                ::tracing::warn!(wasm_hash, "wasm details already extracted");
-                return;
-            }
+        Ok(true) => {
+            ::tracing::warn!(wasm_hash, "wasm details already extracted");
+            return;
         }
-        Ok(None) => {}
+        Ok(false) => {}
         Err(e) => {
             log_db_error("extract_wasm_details.exists", &e, pool.get_ref());
             return;
         }
     }
 
-    let wasm_bytes = sqlx::query_scalar::<_, Vec<u8>>(
-        "SELECT decode(wasm, 'hex') FROM archive.wasm_binaries WHERE wasm_hash = $1",
+    let wasm_record = sqlx::query_as::<_, (Vec<u8>, i64)>(
+        "SELECT decode(wasm, 'hex') AS wasm_binary, ledger_sequence \
+         FROM archive.wasm_binaries \
+         WHERE wasm_hash = $1",
     )
-    .bind(&wasm_hash)
+    .bind(wasm_hash)
     .fetch_optional(pool.get_ref())
     .await;
 
-    match wasm_bytes {
-        Ok(Some(bytes)) => {
-            let metadata = parse_wasm_meta(&bytes);
-            let spec = parse_wasm_spec(&bytes);
-        }
+    let (wasm_binary, ledger_sequence) = match wasm_record {
+        Ok(Some(record)) => record,
         Ok(None) => {
             ::tracing::warn!(wasm_hash, "wasm hash not found in archive.wasm_binaries");
             return;
         }
         Err(e) => {
-            log_db_error("extract_wasm_details.wasm_bytes", &e, pool.get_ref());
+            log_db_error("extract_wasm_details.wasm_binary", &e, pool.get_ref());
+            return;
+        }
+    };
+
+    let contract_meta = match parse_wasm_meta(&wasm_binary) {
+        Ok(meta) => Some(serde_json::Value::Object(meta).to_string()),
+        Err(e) => {
+            ::tracing::warn!(
+                wasm_hash,
+                error = %e,
+                error_debug = ?e,
+                "failed to parse wasm metadata"
+            );
+            None
+        }
+    };
+
+    let contract_spec = match parse_wasm_spec(&wasm_binary) {
+        Ok(spec) => Some(serde_json::Value::Object(spec).to_string()),
+        Err(e) => {
+            ::tracing::warn!(
+                wasm_hash,
+                error = %e,
+                error_debug = ?e,
+                "failed to parse wasm constructor spec"
+            );
+            None
+        }
+    };
+
+    let insert_result = sqlx::query(
+        "INSERT INTO v1.registered_wasm_details (wasm_hash, contract_spec, contract_meta, ledger_sequence) \
+         VALUES ($1, $2::jsonb, $3::jsonb, $4) \
+         ON CONFLICT (wasm_hash) DO NOTHING",
+    )
+    .bind(wasm_hash)
+    .bind(contract_spec.as_deref())
+    .bind(contract_meta.as_deref())
+    .bind(ledger_sequence)
+    .execute(pool.get_ref())
+    .await;
+
+    match insert_result {
+        Ok(result) => {
+            if result.rows_affected() == 0 {
+                ::tracing::warn!(
+                    wasm_hash,
+                    "wasm details insertion skipped because row already exists"
+                );
+            }
+        }
+        Err(e) => {
+            log_db_error(
+                "extract_wasm_details.insert_registered_wasm_details",
+                &e,
+                pool.get_ref(),
+            );
         }
     }
 }

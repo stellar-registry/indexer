@@ -7,7 +7,7 @@ use stellar_xdr::curr::{ScMetaEntry, ScMetaV0};
 use tracing_actix_web::{DefaultRootSpanBuilder, RequestId, TracingLogger};
 
 use crate::error::{ErrorResponse, InternalErrorResponse};
-use crate::tasks::{extract_wasm_details, wasm_details_task};
+use crate::tasks::wasm_details_task;
 use crate::tracing::init_tracing;
 mod error;
 mod tasks;
