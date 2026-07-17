@@ -1,7 +1,4 @@
-use std::env;
-
-use actix_governor::{Governor, GovernorConfigBuilder};
-use actix_web::{middleware::Condition, web, App, HttpResponse, HttpServer};
+use actix_web::{web, App, HttpResponse, HttpServer};
 use serde::{Deserialize, Serialize};
 use serde_qs::actix::QsQuery;
 use sqlx::postgres::PgPoolOptions;
@@ -12,7 +9,7 @@ use tracing_actix_web::{DefaultRootSpanBuilder, RequestId, TracingLogger};
 use crate::error::{ErrorResponse, InternalErrorResponse};
 use crate::tracing::init_tracing;
 mod error;
-mod key_extractor;
+mod rate_limit;
 mod tracing;
 mod util;
 
@@ -847,14 +844,6 @@ async fn main() -> std::io::Result<()> {
         .parse()
         .expect("PORT must be a valid number");
 
-    let is_fly = env::var("FLY_APP_NAME").is_ok();
-    let governor_conf = GovernorConfigBuilder::default()
-        .key_extractor(key_extractor::Extractor::default())
-        .seconds_per_request(2)
-        .burst_size(5)
-        .finish()
-        .unwrap();
-
     init_tracing();
 
     ::tracing::info!(
@@ -873,7 +862,7 @@ async fn main() -> std::io::Result<()> {
             .service(
                 web::scope("/v1")
                     // add rate-limiter only when deployed to fly.io as it fetches a fly-specific header
-                    .wrap(Condition::new(is_fly, Governor::new(&governor_conf)))
+                    .wrap(rate_limit::middleware())
                     .route("", web::get().to(index_v1))
                     .route("/wasms", web::get().to(get_wasms))
                     .route("/wasms/{wasm_name}", web::get().to(get_wasm_root_channel))
