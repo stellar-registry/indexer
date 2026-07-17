@@ -11,6 +11,7 @@ use crate::tracing::init_tracing;
 mod error;
 mod tracing;
 mod util;
+mod tasks;
 
 #[derive(Deserialize, Debug)]
 struct QueryParams {

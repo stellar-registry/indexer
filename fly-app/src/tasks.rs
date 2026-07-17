@@ -1,7 +1,24 @@
+use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
-use stellar_xdr::curr::{ScMetaEntry, ScMetaV0, ScSpecEntry};
+use stellar_xdr::curr::{ScMetaEntry, ScMetaV0, ScSpecEntry, ScSpecTypeDef};
 
-fn parse_wasm_meta(wasm: &[u8]) -> Result<serde_json::Map, soroban_meta::read::FromWasmError> {
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct FunctionInput {
+    doc: String,
+    name: String,
+    #[serde(rename = "type")]
+    type_: ScSpecTypeDef,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct FunctionSpec {
+    doc: Option<String>,        // None if empty
+    inputs: Vec<FunctionInput>, // (arg_name, arg_type)
+}
+
+fn parse_wasm_meta(
+    wasm: &[u8],
+) -> Result<serde_json::Map<String, serde_json::Value>, soroban_meta::read::FromWasmError> {
     let meta = soroban_meta::read::from_wasm(&wasm);
     match meta {
         Ok(entries) => {
@@ -19,7 +36,9 @@ fn parse_wasm_meta(wasm: &[u8]) -> Result<serde_json::Map, soroban_meta::read::F
     }
 }
 
-fn parse_wasm_spec(wasm: &[u8]) -> Result<serde_json::Map, soroban_spec::read::FromWasmError> {
+fn parse_wasm_spec(
+    wasm: &[u8],
+) -> Result<serde_json::Map<String, serde_json::Value>, soroban_spec::read::FromWasmError> {
     let spec = soroban_spec::read::from_wasm(&wasm);
     match spec {
         Ok(entries) => {
@@ -31,7 +50,7 @@ fn parse_wasm_spec(wasm: &[u8]) -> Result<serde_json::Map, soroban_spec::read::F
                 _ => None,
             });
             constructor.map(|f| {
-                let spec = ConstructorSpec {
+                let spec = FunctionSpec {
                     doc: Some(f.doc.to_utf8_string_lossy()),
                     inputs: f
                         .inputs
@@ -45,7 +64,7 @@ fn parse_wasm_spec(wasm: &[u8]) -> Result<serde_json::Map, soroban_spec::read::F
                 };
                 obj.insert(
                     "constructor".to_string(),
-                    serde_json::to_value(value).unwrap(),
+                    serde_json::to_value(spec).unwrap(),
                 );
             });
             return Ok(obj);
@@ -65,6 +84,7 @@ pub async fn extract_wasm_details(pool: &PgPool, wasm_hash: &str) {
     match wasm_bytes {
         Ok(Some(bytes)) => {
             let metadata = parse_wasm_meta(&bytes);
+            let spec = parse_wasm_spec(&bytes);
         }
         Ok(None) => {}
         Err(e) => {}
