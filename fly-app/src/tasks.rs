@@ -1,7 +1,9 @@
-use actix_web::{HttpResponse, web};
+use actix_web::{web, HttpResponse};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use stellar_xdr::curr::{ScMetaEntry, ScMetaV0, ScSpecEntry, ScSpecTypeDef};
+
+use crate::log_db_error;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct FunctionInput {
@@ -80,6 +82,26 @@ fn parse_wasm_spec(
 }
 
 async fn extract_wasm_details(wasm_hash: &str, pool: web::Data<PgPool>) {
+    let is_extracted = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM registered_wasm_details WHERE wasm_hash = $1)",
+    )
+    .bind(&wasm_hash)
+    .fetch_optional(pool.get_ref())
+    .await;
+    match is_extracted {
+        Ok(Some(result)) => {
+            if result == true {
+                ::tracing::warn!(wasm_hash, "wasm details already extracted");
+                return;
+            }
+        }
+        Ok(None) => {}
+        Err(e) => {
+            log_db_error("extract_wasm_details.exists", &e, pool.get_ref());
+            return;
+        }
+    }
+
     let wasm_bytes = sqlx::query_scalar::<_, Vec<u8>>(
         "SELECT decode(wasm, 'hex') FROM archive.wasm_binaries WHERE wasm_hash = $1",
     )
@@ -92,8 +114,13 @@ async fn extract_wasm_details(wasm_hash: &str, pool: web::Data<PgPool>) {
             let metadata = parse_wasm_meta(&bytes);
             let spec = parse_wasm_spec(&bytes);
         }
-        Ok(None) => {}
-        Err(e) => {}
+        Ok(None) => {
+            ::tracing::warn!(wasm_hash, "wasm hash not found in archive.wasm_binaries");
+            return;
+        }
+        Err(e) => {
+            log_db_error("extract_wasm_details.wasm_bytes", &e, pool.get_ref());
+        }
     }
 }
 
