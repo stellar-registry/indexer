@@ -1,5 +1,5 @@
 name: contract-lifecycle-${NETWORK}
-resource_size: s
+resource_size: xl
 use_dedicated_ip: false
 job: false
 # ─────────────────────────────────────────────────────────────────────────────
