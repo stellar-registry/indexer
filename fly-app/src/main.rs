@@ -9,6 +9,7 @@ use tracing_actix_web::{DefaultRootSpanBuilder, RequestId, TracingLogger};
 use crate::error::{ErrorResponse, InternalErrorResponse};
 use crate::tracing::init_tracing;
 mod error;
+mod rate_limit;
 mod tracing;
 mod util;
 
@@ -858,37 +859,39 @@ async fn main() -> std::io::Result<()> {
             .wrap(tracing_middleware)
             .app_data(web::Data::new(pool.clone()))
             .route("/", web::get().to(index))
-            .route("/v1", web::get().to(index_v1))
-            .route("/v1/wasms", web::get().to(get_wasms))
-            .route(
-                "/v1/wasms/{wasm_name}",
-                web::get().to(get_wasm_root_channel),
-            )
-            .route(
-                "/v1/wasms/{channel}/{wasm_name}",
-                web::get().to(get_wasm_latest),
-            )
-            .route(
-                "/v1/wasms/{wasm_name}/v/{version}",
-                web::get().to(get_wasm_version_root),
-            )
-            .route(
-                "/v1/wasms/{channel}/{wasm_name}/v/{version}",
-                web::get().to(get_wasm_version),
-            )
-            .route("/v1/registries", web::get().to(get_registries))
-            .route("/v1/contracts", web::get().to(get_contracts_root))
-            .route(
-                "/v1/contract_deploy_details/{channel}/{contract_name}",
-                web::get().to(get_contract_deploy_detail),
-            )
-            .route(
-                "/v1/contracts/{contract_name}",
-                web::get().to(get_single_contract_root),
-            )
-            .route(
-                "/v1/contracts/{channel}/{contract_name}",
-                web::get().to(get_single_contract),
+            .service(
+                web::scope("/v1")
+                    // add rate-limiter only when deployed to fly.io as it fetches a fly-specific header
+                    .wrap(rate_limit::middleware())
+                    .route("", web::get().to(index_v1))
+                    .route("/wasms", web::get().to(get_wasms))
+                    .route("/wasms/{wasm_name}", web::get().to(get_wasm_root_channel))
+                    .route(
+                        "/wasms/{channel}/{wasm_name}",
+                        web::get().to(get_wasm_latest),
+                    )
+                    .route(
+                        "/wasms/{wasm_name}/v/{version}",
+                        web::get().to(get_wasm_version_root),
+                    )
+                    .route(
+                        "/wasms/{channel}/{wasm_name}/v/{version}",
+                        web::get().to(get_wasm_version),
+                    )
+                    .route("/registries", web::get().to(get_registries))
+                    .route("/contracts", web::get().to(get_contracts_root))
+                    .route(
+                        "/contract_deploy_details/{channel}/{contract_name}",
+                        web::get().to(get_contract_deploy_detail),
+                    )
+                    .route(
+                        "/contracts/{contract_name}",
+                        web::get().to(get_single_contract_root),
+                    )
+                    .route(
+                        "/contracts/{channel}/{contract_name}",
+                        web::get().to(get_single_contract),
+                    ),
             )
             .route("/health", web::get().to(health))
     })
