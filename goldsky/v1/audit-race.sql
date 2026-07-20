@@ -3,7 +3,7 @@
 --
 -- Why this exists
 -- ---------------
--- `transform_3_events_with_name` in goldsky/v1/index.yaml filters the
+-- `transform_3_events_with_name` in goldsky/v1/index.template.yaml filters the
 -- event stream through `dynamic_table_check('registries_dynamic_table',
 -- emitter_contract_id)`. The dynamic table is populated by a sibling
 -- transform (`transform_2_subregistry_events`) whose writes land in a

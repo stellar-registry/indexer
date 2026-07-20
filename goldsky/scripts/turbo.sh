@@ -2,10 +2,10 @@
 # Wrapper that runs `goldsky turbo` inside a debian:trixie-slim container
 # to work around the host GLIBC < 2.39 incompatibility.
 #
-# Usage:
-#   ./goldsky/scripts/turbo.sh validate goldsky/v1/index.yaml
-#   ./goldsky/scripts/turbo.sh apply goldsky/v1/index.yaml
-#   ./goldsky/scripts/turbo.sh stop registry-testnet-v1
+# Usage (render first: ./goldsky/scripts/render.sh <network>):
+#   ./goldsky/scripts/turbo.sh validate goldsky/rendered/testnet/v1/index.yaml
+#   ./goldsky/scripts/turbo.sh apply goldsky/rendered/mainnet/v1/index.yaml
+#   ./goldsky/scripts/turbo.sh stop registry-mainnet-v1
 #   ./goldsky/scripts/turbo.sh list
 
 set -euo pipefail

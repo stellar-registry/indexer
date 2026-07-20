@@ -8,7 +8,7 @@
 # Postgres-backed dynamic table from another transform. Events whose
 # emitter contract_id was added to the dynamic table only a few ledgers
 # earlier can be dropped by the check because the Postgres write hasn't
-# committed yet. See goldsky/v1/index.yaml transforms 3 and 4, as well as
+# committed yet. See goldsky/v1/index.template.yaml transforms 3 and 4, as well as
 # comments in ../v1/audit-race.sql
 #
 # `turbo restart --clear-state` clears pipeline state (source
@@ -21,8 +21,8 @@
 # dynamic table has been populated with every contract_id the filter
 # will need.
 #
-# Usage:
-#   ./goldsky/scripts/refresh.sh goldsky/v1
+# Usage (render first: ./goldsky/scripts/render.sh <network>):
+#   ./goldsky/scripts/refresh.sh goldsky/rendered/testnet/v1
 
 set -euo pipefail
 

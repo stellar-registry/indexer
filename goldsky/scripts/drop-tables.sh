@@ -8,7 +8,7 @@
 # unrelated tables shared with other systems.
 #
 # Usage:
-#   DATABASE_URL="postgres://..." ./goldsky/scripts/drop-tables.sh goldsky/v1/index.yaml
+#   DATABASE_URL="postgres://..." ./goldsky/scripts/drop-tables.sh goldsky/rendered/testnet/v1/index.yaml
 
 set -euo pipefail
 

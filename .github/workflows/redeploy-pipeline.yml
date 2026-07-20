@@ -1,0 +1,143 @@
+name: Redeploy Goldsky Pipeline (clear-state backfill)
+
+# Manual, destructive redeploy of a single Goldsky pipeline: render the
+# network template, DROP its schema, re-apply, and `turbo restart
+# --clear-state` so the source checkpoint rewinds to the pipeline's
+# start_at and the full history replays into the freshly-dropped sink
+# tables.
+#
+# This is the only way to pull in history EARLIER than the pipeline's
+# current checkpoint (e.g. lowering ARCHIVE_START_AT to backfill contract
+# deploys that predate the registry — see stellar-registry/indexer#29).
+# A plain `turbo apply` cannot do it: applying a changed start_at updates
+# the definition but never rewinds the checkpoint.
+#
+# Deliberately workflow_dispatch only — NOT wired to push/merge. Each run
+# wipes the pipeline's schema and triggers a multi-hour replay, so it must
+# be an explicit, one-off operator action guarded by `confirm`.
+
+on:
+  workflow_dispatch:
+    inputs:
+      network:
+        description: "Network (matches goldsky/networks/<network>.env)"
+        required: true
+        type: choice
+        options:
+          - mainnet
+          - testnet
+        default: mainnet
+      pipeline:
+        description: "Pipeline to redeploy"
+        required: true
+        type: choice
+        options:
+          - archive
+          - v1
+        default: archive
+      confirm:
+        description: "Type the exact pipeline name to confirm the DROP (e.g. contract-lifecycle-mainnet)"
+        required: true
+        type: string
+      subregistries:
+        description: "v1 only: expected initial subregistry count for the race audit (leave blank for archive)"
+        required: false
+        type: string
+        default: ""
+
+concurrency:
+  group: redeploy-pipeline
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  redeploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Guard — confirm matches the pipeline being dropped
+        env:
+          NETWORK: ${{ inputs.network }}
+          PIPELINE: ${{ inputs.pipeline }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          case "$PIPELINE" in
+            archive) expected="contract-lifecycle-$NETWORK" ;;
+            v1)      expected="registry-$NETWORK-v1" ;;
+            *) echo "error: unknown pipeline '$PIPELINE'" >&2; exit 1 ;;
+          esac
+          if [[ "$CONFIRM" != "$expected" ]]; then
+            echo "error: confirm '$CONFIRM' does not match '$expected' — refusing to drop." >&2
+            exit 1
+          fi
+          echo "confirmed: will redeploy '$expected' (drops its schema and replays from start_at)"
+
+      - name: Install psql and envsubst
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client gettext-base
+
+      - name: Install Goldsky turbo CLI
+        run: |
+          set -euo pipefail
+          curl -fsSL https://install-turbo.goldsky.com | bash
+          echo "$HOME/.goldsky/bin" >> "$GITHUB_PATH"
+
+      - name: Authenticate Goldsky CLI
+        env:
+          GOLDSKY_API_KEY: ${{ secrets.GOLDSKY_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${GOLDSKY_API_KEY:-}" ]]; then
+            echo "error: GOLDSKY_API_KEY secret is not set" >&2
+            exit 1
+          fi
+          mkdir -p "$HOME/.goldsky"
+          printf '%s' "$GOLDSKY_API_KEY" > "$HOME/.goldsky/auth_token"
+          chmod 600 "$HOME/.goldsky/auth_token"
+
+      - name: Render pipeline definition
+        env:
+          NETWORK: ${{ inputs.network }}
+          PIPELINE: ${{ inputs.pipeline }}
+        run: |
+          set -euo pipefail
+          ./goldsky/scripts/render.sh "$NETWORK" "$PIPELINE"
+
+      - name: Redeploy (drop + clear-state replay)
+        env:
+          NETWORK: ${{ inputs.network }}
+          PIPELINE: ${{ inputs.pipeline }}
+          SUBREGISTRIES: ${{ inputs.subregistries }}
+          MAINNET_DATABASE_URL: ${{ secrets.MAINNET_DATABASE_URL }}
+          TESTNET_DATABASE_URL: ${{ secrets.TESTNET_DATABASE_URL }}
+        run: |
+          set -euo pipefail
+          case "$NETWORK" in
+            mainnet) DATABASE_URL="$MAINNET_DATABASE_URL" ;;
+            testnet) DATABASE_URL="$TESTNET_DATABASE_URL" ;;
+            *) echo "error: unknown network '$NETWORK'" >&2; exit 1 ;;
+          esac
+          if [[ -z "${DATABASE_URL:-}" ]]; then
+            echo "error: DATABASE_URL secret for '$NETWORK' is not set (expected ${NETWORK^^}_DATABASE_URL)" >&2
+            exit 1
+          fi
+          echo "::add-mask::$DATABASE_URL"
+          export DATABASE_URL
+
+          dir="goldsky/rendered/$NETWORK/$PIPELINE"
+          args=()
+          if [[ "$PIPELINE" == "v1" && -n "${SUBREGISTRIES:-}" ]]; then
+            args+=(--number-of-initial-subregistries "$SUBREGISTRIES")
+          fi
+
+          # redeploy.sh returns once the clear-state restart is issued; the
+          # replay itself runs asynchronously on Goldsky (monitor with
+          # `turbo status <pipeline>` / query the sink tables).
+          ./goldsky/scripts/redeploy.sh "${args[@]}" "$dir"
