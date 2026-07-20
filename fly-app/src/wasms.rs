@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use stellar_xdr::curr::{ScMetaEntry, ScMetaV0, ScSpecEntry, ScSpecTypeDef};
 
-use crate::log_db_error;
+use crate::{log_db_error, util, WasmMeta};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct FunctionInput {
@@ -38,6 +38,7 @@ fn parse_wasm_meta(
                     serde_json::Value::String(val.to_utf8_string_lossy()),
                 );
             }
+
             return Ok(obj);
         }
         Err(e) => Err(e),
@@ -131,7 +132,31 @@ async fn extract_wasm_details(wasm_hash: &str, pool: web::Data<PgPool>) {
     };
 
     let contract_meta = match parse_wasm_meta(&wasm_binary) {
-        Ok(meta) => Some(serde_json::Value::Object(meta).to_string()),
+        Ok(mut meta) => {
+            if let Some(source_repo) = meta
+                .get("source_repo")
+                .and_then(|value| value.as_str())
+                .map(util::parse_source_repo)
+            {
+                meta.insert(
+                    "source_repo".to_string(),
+                    serde_json::Value::String(source_repo),
+                );
+            }
+
+            if let Err(e) =
+                serde_json::from_value::<WasmMeta>(serde_json::Value::Object(meta.clone()))
+            {
+                ::tracing::warn!(
+                    wasm_hash,
+                    error = %e,
+                    error_debug = ?e,
+                    "failed to validate wasm metadata against WasmMeta schema"
+                );
+            }
+
+            Some(serde_json::Value::Object(meta).to_string())
+        }
         Err(e) => {
             ::tracing::warn!(
                 wasm_hash,
@@ -187,7 +212,7 @@ async fn extract_wasm_details(wasm_hash: &str, pool: web::Data<PgPool>) {
     }
 }
 
-pub async fn wasm_details_task(
+pub async fn wasm_details_webhook(
     payload: actix_web::web::Json<WasmDetailPayload>,
     pool: web::Data<PgPool>,
 ) -> HttpResponse {
