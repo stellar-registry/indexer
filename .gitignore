@@ -7,3 +7,6 @@ node_modules
 # CDK asset staging directory
 .cdk.staging
 cdk.out
+
+# rendered per-network Goldsky pipeline definitions (goldsky/scripts/render.sh output)
+goldsky/rendered/

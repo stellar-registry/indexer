@@ -26,10 +26,10 @@
 #      something is wrong beyond the known race (e.g. pipeline
 #      definition bug, emitters missing from v1.registries).
 #
-# Usage:
-#   DATABASE_URL="postgres://..." ./goldsky/scripts/redeploy.sh goldsky/v1
+# Usage (render first: ./goldsky/scripts/render.sh <network>):
+#   DATABASE_URL="postgres://..." ./goldsky/scripts/redeploy.sh goldsky/rendered/testnet/v1
 #   DATABASE_URL="postgres://..." ./goldsky/scripts/redeploy.sh \
-#       --number-of-initial-subregistries 7 goldsky/v1
+#       --number-of-initial-subregistries 7 goldsky/rendered/testnet/v1
 #
 # The positional argument is a directory containing:
 #   - index.yaml      (required) Goldsky pipeline definition
@@ -43,6 +43,8 @@
 #   DYNAMIC_TABLE_MAX_ATTEMPTS    dynamic-table poll tries (default: 60)
 #   DYNAMIC_TABLE_RETRY_DELAY     seconds between polls    (default: 5)
 #   AUDIT_SETTLE_DELAY            sleep before audit       (default: 10)
+#   AUDIT_RETRY_ATTEMPTS          audit poll attempts      (default: 30)
+#   AUDIT_RETRY_DELAY             seconds between audits   (default: 10)
 
 set -euo pipefail
 
@@ -168,9 +170,18 @@ if [[ -n "$EXPECTED_SUBREGISTRIES" ]]; then
 fi
 echo ""
 
-# 1. Stop (pause) the pipeline
+# 1. Stop (pause) the pipeline. A "not found" failure means the
+#    pipeline has never been applied — first deploy — so there is
+#    nothing to pause (or drop) and we proceed straight to apply.
 echo "==> pausing pipeline..."
-"$TURBO" pause "$PIPELINE_NAME"
+if pause_out=$("$TURBO" pause "$PIPELINE_NAME" 2>&1); then
+  printf '%s\n' "$pause_out"
+elif grep -qi "not found" <<<"$pause_out"; then
+  echo "==> pipeline '$PIPELINE_NAME' not deployed yet — first deploy, skipping pause"
+else
+  printf '%s\n' "$pause_out" >&2
+  exit 1
+fi
 echo ""
 
 # 2. Drop tables
@@ -277,8 +288,34 @@ if [[ -n "$EXPECTED_SUBREGISTRIES" ]]; then
     fi
   }
 
+  # Poll the audit until it comes back clean or attempts run out,
+  # echoing the final dropped count. A single-shot audit races the
+  # replay itself: right after (re)start the pipeline is still working
+  # through history from start_at, so events it simply hasn't reached
+  # yet look identical to race drops. Only a count that stays non-zero
+  # once the replay has caught up is a real drop.
+  audit_max_attempts="${AUDIT_RETRY_ATTEMPTS:-30}"
+  audit_delay="${AUDIT_RETRY_DELAY:-10}"
+  audit_wait_clean() {
+    local attempt=1 dropped
+    while true; do
+      dropped=$(audit_run)
+      if (( dropped == 0 )); then
+        echo 0
+        return
+      fi
+      if (( attempt >= audit_max_attempts )); then
+        echo "$dropped"
+        return
+      fi
+      echo "  $dropped events unaccounted for (attempt $attempt/$audit_max_attempts); replay may still be catching up, retrying in ${audit_delay}s..." >&2
+      attempt=$((attempt + 1))
+      sleep "$audit_delay"
+    done
+  }
+
   echo "==> running race audit: $AUDIT_SQL"
-  dropped=$(audit_run)
+  dropped=$(audit_wait_clean)
 
   if (( dropped == 0 )); then
     echo "==> no race drops detected — redeploy complete"
@@ -295,7 +332,7 @@ if [[ -n "$EXPECTED_SUBREGISTRIES" ]]; then
   echo ""
 
   echo "==> re-running race audit after refresh..."
-  dropped_after=$(audit_run)
+  dropped_after=$(audit_wait_clean)
 
   if (( dropped_after > 0 )); then
     echo "error: $dropped_after events still missing after refresh — manual investigation needed" >&2

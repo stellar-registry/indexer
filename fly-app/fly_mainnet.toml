@@ -1,5 +1,6 @@
 app = 'stellar-registry-mainnet'
-primary_region = 'ams'
+# goldsky hosts its DB in us-west-2 (oregon), sjc should be the closest to it
+primary_region = 'sjc'
 
 [build]
 

@@ -1,11 +1,11 @@
-name: registry-testnet-v1
+name: registry-${NETWORK}-v1
 resource_size: s
 use_dedicated_ip: false
 job: false
 sources:
     goldsky_source:
-        dataset_name: stellar_testnet.events
-        start_at: 2209577
+        dataset_name: ${DATASET_PREFIX}.events
+        start_at: ${V1_START_AT}
         type: dataset
         version: 1.2.0
 transforms:
@@ -62,13 +62,13 @@ transforms:
                 END AS registry_channel
             FROM transform_2_events_with_name_raw
             WHERE event_name = 'sub_reg'
-              AND emitter_contract_id = 'CAAXJETKPYAATU4HVVQUTE2FFBULNFGZNEOC3MS635U5K3GZLAY2HI4M'
+              AND emitter_contract_id = '${ROOT_REGISTRY}'
 
     registries_dynamic_table:
         type: dynamic_table
         backend_type: Postgres
         backend_entity_name: registries_dynamic_table
-        secret_name: HOSTED_POSTGRES_CMJD1KI8O0
+        secret_name: ${PG_SECRET_NAME}
         schema: v1
         sql: SELECT contract_id FROM transform_3_subregistry_events
 
@@ -270,48 +270,48 @@ sinks:
     subregistry_events_pg:
         from: transform_3_subregistry_events
         schema: v1
-        secret_name: HOSTED_POSTGRES_CMJD1KI8O0
+        secret_name: ${PG_SECRET_NAME}
         table: registries
         type: postgres
     deploy_events_pg:
         from: transform_5_deploy_events
         schema: v1
-        secret_name: HOSTED_POSTGRES_CMJD1KI8O0
+        secret_name: ${PG_SECRET_NAME}
         table: deployed_contracts
         type: postgres
     publish_events_pg:
         from: transform_5_publish_events
         schema: v1
-        secret_name: HOSTED_POSTGRES_CMJD1KI8O0
+        secret_name: ${PG_SECRET_NAME}
         table: published_wasms
         type: postgres
     raw_events_backup:
         from: transform_2_events_with_name_raw
         schema: v1
-        secret_name: HOSTED_POSTGRES_CMJD1KI8O0
+        secret_name: ${PG_SECRET_NAME}
         table: raw_events_backup
         type: postgres
     register_events_pg:
         from: transform_5_register_events
         schema: v1
-        secret_name: HOSTED_POSTGRES_CMJD1KI8O0
+        secret_name: ${PG_SECRET_NAME}
         table: registered_contracts
         type: postgres
     rename_events_pg:
         from: transform_5_rename
         schema: v1
-        secret_name: HOSTED_POSTGRES_CMJD1KI8O0
+        secret_name: ${PG_SECRET_NAME}
         table: rename
         type: postgres
     update_address_events_pg:
         from: transform_5_update_address
         schema: v1
-        secret_name: HOSTED_POSTGRES_CMJD1KI8O0
+        secret_name: ${PG_SECRET_NAME}
         table: update_address
         type: postgres
     update_owner_events_pg:
         from: transform_5_update_owner
         schema: v1
-        secret_name: HOSTED_POSTGRES_CMJD1KI8O0
+        secret_name: ${PG_SECRET_NAME}
         table: update_owner
         type: postgres

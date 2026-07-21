@@ -18,3 +18,4 @@ tracing-actix-web = "0.7"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 uuid = { version = "1.23.3", features = ["v4"] }
+actix-governor = "0.10.0"
