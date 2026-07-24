@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use stellar_xdr::curr::{ScMetaEntry, ScMetaV0, ScSpecEntry, ScSpecTypeDef};
 
-use crate::{log_db_error, util, WasmMeta};
+use crate::{log_db_error, WasmMeta};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct FunctionInput {
@@ -132,18 +132,7 @@ async fn extract_wasm_details(wasm_hash: &str, pool: web::Data<PgPool>) {
     };
 
     let contract_meta = match parse_wasm_meta(&wasm_binary) {
-        Ok(mut meta) => {
-            if let Some(source_repo) = meta
-                .get("source_repo")
-                .and_then(|value| value.as_str())
-                .map(util::parse_source_repo)
-            {
-                meta.insert(
-                    "source_repo".to_string(),
-                    serde_json::Value::String(source_repo),
-                );
-            }
-
+        Ok(meta) => {
             if let Err(e) =
                 serde_json::from_value::<WasmMeta>(serde_json::Value::Object(meta.clone()))
             {
@@ -216,12 +205,11 @@ pub async fn wasm_details_webhook(
     payload: actix_web::web::Json<WasmDetailPayload>,
     pool: web::Data<PgPool>,
 ) -> HttpResponse {
-    let wasm_hash = payload.wasm_hash.clone();
     // spawn requires it to be 'static because it might outlive the task, cloning it will make the
     // spawned task own a PgPool.
     let pool = pool.clone();
     let _handle = actix_web::rt::spawn(async move {
-        extract_wasm_details(wasm_hash.as_str(), pool).await;
+        extract_wasm_details(payload.wasm_hash.as_str(), pool).await;
     });
 
     HttpResponse::Ok().finish()
