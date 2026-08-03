@@ -1,3 +1,4 @@
+use actix_web::middleware::from_fn;
 use actix_web::{web, App, HttpResponse, HttpServer};
 use serde::{Deserialize, Serialize};
 use serde_qs::actix::QsQuery;
@@ -8,10 +9,14 @@ use tracing_actix_web::{DefaultRootSpanBuilder, RequestId, TracingLogger};
 
 use crate::error::{ErrorResponse, InternalErrorResponse};
 use crate::tracing::init_tracing;
+use crate::wasms::wasm_details_webhook;
+use crate::webhooks::{load_webhook_config, webhook_auth_middleware};
 mod error;
 mod rate_limit;
 mod tracing;
 mod util;
+mod wasms;
+mod webhooks;
 
 #[derive(Deserialize, Debug)]
 struct QueryParams {
@@ -81,7 +86,7 @@ struct WasmDetail {
 }
 
 #[derive(Serialize, Deserialize)]
-struct WasmMeta {
+pub(crate) struct WasmMeta {
     rsver: Option<String>,
     rssdkver: Option<String>,
     rssdk_spec_shaking: Option<String>,
@@ -319,6 +324,7 @@ async fn fetch_wasm_meta(pool: &PgPool, wasm_hash: &str) -> Option<WasmMeta> {
                             serde_json::Value::String(val.to_utf8_string_lossy()),
                         );
                     }
+
                     let wasm_meta =
                         match serde_json::from_value::<WasmMeta>(serde_json::Value::Object(obj)) {
                             Ok(m) => m,
@@ -844,10 +850,13 @@ async fn main() -> std::io::Result<()> {
         .parse()
         .expect("PORT must be a valid number");
 
+    let webhook_config = load_webhook_config();
+
     init_tracing();
 
     ::tracing::info!(
         port,
+        webhook_auth_enabled = webhook_config.enabled(),
         pool_size = pool.size(),
         pool_idle = pool.num_idle(),
         "starting server"
@@ -858,6 +867,7 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .wrap(tracing_middleware)
             .app_data(web::Data::new(pool.clone()))
+            .app_data(web::Data::new(webhook_config.clone()))
             .route("/", web::get().to(index))
             .service(
                 web::scope("/v1")
@@ -892,6 +902,11 @@ async fn main() -> std::io::Result<()> {
                         "/contracts/{channel}/{contract_name}",
                         web::get().to(get_single_contract),
                     ),
+            )
+            .service(
+                web::scope("/v1/webhooks")
+                    .wrap(from_fn(webhook_auth_middleware))
+                    .route("/wasm-details", web::post().to(wasm_details_webhook)),
             )
             .route("/health", web::get().to(health))
     })

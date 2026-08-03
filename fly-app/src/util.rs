@@ -1,6 +1,8 @@
 use crate::error::ErrorResponse;
 use actix_web::HttpResponse;
 
+const DEFAULT_GITHUB_REF: &str = "main";
+
 pub fn build_sort_spec(
     sort_by: Vec<String>,
     descending: Vec<bool>,

@@ -12,6 +12,7 @@ chrono = { version = "0.4", features = ["serde"] }
 sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "tls-rustls", "chrono"] }
 tokio = { version = "1", features = ["full"] }
 soroban-meta = "26.0.1"
+soroban-spec = "26.0.1"
 stellar-xdr = "26.0.1"
 tracing-actix-web = "0.7"
 tracing = "0.1"

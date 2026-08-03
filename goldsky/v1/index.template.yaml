@@ -266,6 +266,14 @@ transforms:
             FROM transform_4_events_with_name
             WHERE event_name = 'update_owner'
         type: sql
+    transform_6_register_events_wasm_hash:
+        primary_key: id
+        sql: |-
+            SELECT
+                id, wasm_hash
+            FROM transform_5_register_events
+            WHERE wasm_hash is NOT NULL
+        type: sql
 sinks:
     subregistry_events_pg:
         from: transform_3_subregistry_events
@@ -315,3 +323,9 @@ sinks:
         secret_name: ${PG_SECRET_NAME}
         table: update_owner
         type: postgres
+    extract_wasm_spec_webhook:
+        type: webhook
+        from: transform_6_register_events_wasm_hash
+        secret_name: ${INDEXER_WEBHOOK_SECRET_NAME}
+        url: ${INDEXER_WEBHOOK_BASE_URL}/wasm-details
+        one_row_per_request: true
