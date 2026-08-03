@@ -272,6 +272,7 @@ transforms:
             SELECT
                 id, wasm_hash
             FROM transform_5_register_events
+            WHERE wasm_hash is NOT NULL
         type: sql
 sinks:
     subregistry_events_pg:
