@@ -21,6 +21,7 @@ pub struct FunctionSpec {
 
 #[derive(Serialize, Deserialize)]
 pub struct WasmDetailPayload {
+    id: String,
     wasm_hash: String,
 }
 
