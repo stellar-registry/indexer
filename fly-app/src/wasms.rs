@@ -1,9 +1,10 @@
 use actix_web::{web, HttpResponse};
 use serde::{Deserialize, Serialize};
-use sqlx::PgPool;
+use sqlx;
+use sqlx::{types::Json, PgPool};
 use stellar_xdr::curr::{ScMetaEntry, ScMetaV0, ScSpecEntry, ScSpecTypeDef};
 
-use crate::{log_db_error, WasmMeta};
+use crate::log_db_error;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct FunctionInput {
@@ -23,6 +24,41 @@ pub struct FunctionSpec {
 pub struct WasmDetailPayload {
     id: String,
     wasm_hash: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct WasmMetaRow {
+    contract_meta: Option<Json<WasmMeta>>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct WasmMeta {
+    rsver: Option<String>,
+    rssdkver: Option<String>,
+    rssdk_spec_shaking: Option<String>,
+    cliver: Option<String>,
+    source_repo: Option<String>,
+    binver: Option<String>,
+}
+
+pub async fn fetch_wasm_meta(pool: &PgPool, wasm_hash: &str) -> Option<WasmMeta> {
+    let wasm_meta = sqlx::query_as::<_, WasmMetaRow>(
+        "SELECT contract_meta FROM v1.registered_wasm_details WHERE wasm_hash = $1",
+    )
+    .bind(wasm_hash)
+    .fetch_optional(pool)
+    .await;
+    match wasm_meta {
+        Ok(Some(row)) => row.contract_meta.map(|data| data.0),
+        Ok(None) => {
+            ::tracing::warn!(wasm_hash, "no wasm binary found");
+            return None;
+        }
+        Err(e) => {
+            log_db_error("fetch_wasm_meta.select_wasm_binary", &e, pool);
+            return None;
+        }
+    }
 }
 
 fn parse_wasm_meta(
