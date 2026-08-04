@@ -870,6 +870,11 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(webhook_config.clone()))
             .route("/", web::get().to(index))
             .service(
+                web::scope("/v1/webhooks")
+                    .wrap(from_fn(webhook_auth_middleware))
+                    .route("/wasm-details", web::post().to(wasm_details_webhook)),
+            )
+            .service(
                 web::scope("/v1")
                     // add rate-limiter only when deployed to fly.io as it fetches a fly-specific header
                     .wrap(rate_limit::middleware())
@@ -902,11 +907,6 @@ async fn main() -> std::io::Result<()> {
                         "/contracts/{channel}/{contract_name}",
                         web::get().to(get_single_contract),
                     ),
-            )
-            .service(
-                web::scope("/v1/webhooks")
-                    .wrap(from_fn(webhook_auth_middleware))
-                    .route("/wasm-details", web::post().to(wasm_details_webhook)),
             )
             .route("/health", web::get().to(health))
     })
