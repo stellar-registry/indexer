@@ -808,6 +808,7 @@ async fn main() -> std::io::Result<()> {
                     .route("", web::get().to(index_v1))
                     .route("/wasms", web::get().to(get_wasms))
                     .route("/wasms/{wasm_name}", web::get().to(get_wasm_root_channel))
+                    .route("/wasms/{wasm_hash}/deploy-spec", web::get().to(fetch_contract_spec_for_deployment))
                     .route(
                         "/wasms/{channel}/{wasm_name}",
                         web::get().to(get_wasm_latest),
@@ -822,7 +823,6 @@ async fn main() -> std::io::Result<()> {
                     )
                     .route("/registries", web::get().to(get_registries))
                     .route("/contracts", web::get().to(get_contracts_root))
-                    .route("/contracts/{wasm_hash}/deploy-spec", web::get().to(fetch_contract_spec_for_deployment))
                     .route(
                         "/contract_deploy_details/{channel}/{contract_name}",
                         web::get().to(get_contract_deploy_detail),

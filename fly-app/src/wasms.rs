@@ -44,7 +44,7 @@ pub struct WasmMeta {
 
 pub async fn fetch_wasm_meta(pool: &PgPool, wasm_hash: &str) -> Option<WasmMeta> {
     let wasm_meta = sqlx::query_as::<_, ExtractedWasmRow>(
-        "SELECT NULL AS contract_spec, contract_meta FROM v1.registered_wasm_details WHERE wasm_hash = $1",
+        "SELECT NULL AS contract_spec, contract_meta FROM v1.extracted_wasm_details WHERE wasm_hash = $1",
     )
     .bind(wasm_hash)
     .fetch_optional(pool)
@@ -67,7 +67,7 @@ pub async fn fetch_wasm_spec(
     wasm_hash: &str,
 ) -> Result<Option<serde_json::Map<String, serde_json::Value>>, sqlx::Error> {
     let wasm_spec = sqlx::query_as::<_, ExtractedWasmRow>(
-        "SELECT contract_spec, NULL as contract_meta FROM v1.registered_wasm_details WHERE wasm_hash = $1",
+        "SELECT contract_spec, NULL as contract_meta FROM v1.extracted_wasm_details WHERE wasm_hash = $1",
     )
     .bind(wasm_hash)
     .fetch_optional(pool)
@@ -255,7 +255,7 @@ async fn extract_wasm_details(wasm_hash: &str, pool: web::Data<PgPool>) {
         }
         Err(e) => {
             log_db_error(
-                "extract_wasm_details.insert_registered_wasm_details",
+                "extract_wasm_details.insert_extracted_wasm_details",
                 &e,
                 pool.get_ref(),
             );
