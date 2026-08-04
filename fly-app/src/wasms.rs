@@ -56,7 +56,7 @@ pub async fn fetch_wasm_meta(pool: &PgPool, wasm_hash: &str) -> Option<WasmMeta>
             return None;
         }
         Err(e) => {
-            log_db_error("fetch_wasm_meta.select_wasm_binary", &e, pool);
+            log_db_error("fetch_wasm_meta", &e, pool);
             return None;
         }
     }
@@ -80,7 +80,7 @@ pub async fn fetch_wasm_spec(
             return Ok(None);
         }
         Err(e) => {
-            log_db_error("fetch_wasm_spec.select_wasm_binary", &e, pool);
+            log_db_error("fetch_wasm_spec", &e, pool);
             return Err(e);
         }
     }
