@@ -6,9 +6,9 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use tracing_actix_web::{DefaultRootSpanBuilder, RequestId, TracingLogger};
 
-use crate::error::{ErrorResponse, internal_server_error_response, log_db_error};
+use crate::error::{internal_server_error_response, log_db_error, ErrorResponse};
 use crate::tracing::init_tracing;
-use crate::wasms::{WasmMeta, fetch_wasm_meta, wasm_details_webhook};
+use crate::wasms::{fetch_wasm_meta, fetch_wasm_spec, wasm_details_webhook, WasmMeta};
 use crate::webhooks::{load_webhook_config, webhook_auth_middleware};
 mod error;
 mod rate_limit;
@@ -273,7 +273,21 @@ async fn get_wasms(
         }
     }
 }
-
+async fn fetch_contract_spec_for_deployment(
+    pool: web::Data<PgPool>,
+    path: web::Path<String>,
+    request_id: RequestId,
+) -> HttpResponse {
+    let wasm_hash = path.into_inner();
+    let wasm_spec = fetch_wasm_spec(pool.get_ref(), &wasm_hash).await;
+    match wasm_spec {
+        Ok(Some(spec)) => HttpResponse::Ok().json(spec),
+        Ok(None) => HttpResponse::NotFound().json(ErrorResponse {
+            error: format!("Wasm with hash {wasm_hash} not found"),
+        }),
+        Err(_) => internal_server_error_response(request_id),
+    }
+}
 
 async fn fetch_wasm_detail(
     pool: &PgPool,
@@ -808,6 +822,7 @@ async fn main() -> std::io::Result<()> {
                     )
                     .route("/registries", web::get().to(get_registries))
                     .route("/contracts", web::get().to(get_contracts_root))
+                    .route("/contracts/{wasm_hash}/deploy-spec", web::get().to(fetch_contract_spec_for_deployment))
                     .route(
                         "/contract_deploy_details/{channel}/{contract_name}",
                         web::get().to(get_contract_deploy_detail),

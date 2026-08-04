@@ -27,8 +27,9 @@ pub struct WasmDetailPayload {
 }
 
 #[derive(sqlx::FromRow)]
-struct WasmMetaRow {
+struct ExtractedWasmRow {
     contract_meta: Option<Json<WasmMeta>>,
+    contract_spec: Option<Json<serde_json::Map<String, serde_json::Value>>>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -42,8 +43,8 @@ pub struct WasmMeta {
 }
 
 pub async fn fetch_wasm_meta(pool: &PgPool, wasm_hash: &str) -> Option<WasmMeta> {
-    let wasm_meta = sqlx::query_as::<_, WasmMetaRow>(
-        "SELECT contract_meta FROM v1.registered_wasm_details WHERE wasm_hash = $1",
+    let wasm_meta = sqlx::query_as::<_, ExtractedWasmRow>(
+        "SELECT NULL AS contract_spec, contract_meta FROM v1.registered_wasm_details WHERE wasm_hash = $1",
     )
     .bind(wasm_hash)
     .fetch_optional(pool)
@@ -57,6 +58,30 @@ pub async fn fetch_wasm_meta(pool: &PgPool, wasm_hash: &str) -> Option<WasmMeta>
         Err(e) => {
             log_db_error("fetch_wasm_meta.select_wasm_binary", &e, pool);
             return None;
+        }
+    }
+}
+
+pub async fn fetch_wasm_spec(
+    pool: &PgPool,
+    wasm_hash: &str,
+) -> Result<Option<serde_json::Map<String, serde_json::Value>>, sqlx::Error> {
+    let wasm_spec = sqlx::query_as::<_, ExtractedWasmRow>(
+        "SELECT contract_spec, NULL as contract_meta FROM v1.registered_wasm_details WHERE wasm_hash = $1",
+    )
+    .bind(wasm_hash)
+    .fetch_optional(pool)
+    .await;
+
+    match wasm_spec {
+        Ok(Some(row)) => Ok(row.contract_spec.map(|data| data.0)),
+        Ok(None) => {
+            ::tracing::warn!(wasm_hash, "no wasm binary found");
+            return Ok(None);
+        }
+        Err(e) => {
+            log_db_error("fetch_wasm_spec.select_wasm_binary", &e, pool);
+            return Err(e);
         }
     }
 }
