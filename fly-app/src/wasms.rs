@@ -154,7 +154,7 @@ fn parse_wasm_spec(
 
 async fn extract_wasm_details(wasm_hash: &str, pool: web::Data<PgPool>) {
     let is_extracted = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM v1.registered_wasm_details WHERE wasm_hash = $1)",
+        "SELECT EXISTS(SELECT 1 FROM v1.extracted_wasm_details WHERE wasm_hash = $1)",
     )
     .bind(wasm_hash)
     .fetch_one(pool.get_ref())
@@ -233,7 +233,7 @@ async fn extract_wasm_details(wasm_hash: &str, pool: web::Data<PgPool>) {
     };
 
     let insert_result = sqlx::query(
-        "INSERT INTO v1.registered_wasm_details (wasm_hash, contract_spec, contract_meta, ledger_sequence) \
+        "INSERT INTO v1.extracted_wasm_details (wasm_hash, contract_spec, contract_meta, ledger_sequence) \
          VALUES ($1, $2::jsonb, $3::jsonb, $4) \
          ON CONFLICT (wasm_hash) DO NOTHING",
     )
