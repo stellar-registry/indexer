@@ -1,9 +1,10 @@
 use actix_web::{web, HttpResponse};
 use serde::{Deserialize, Serialize};
-use sqlx::PgPool;
+use sqlx;
+use sqlx::{types::Json, PgPool};
 use stellar_xdr::curr::{ScMetaEntry, ScMetaV0, ScSpecEntry, ScSpecTypeDef};
 
-use crate::{log_db_error, WasmMeta};
+use crate::log_db_error;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct FunctionInput {
@@ -23,6 +24,66 @@ pub struct FunctionSpec {
 pub struct WasmDetailPayload {
     id: String,
     wasm_hash: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct ExtractedWasmRow {
+    contract_meta: Option<Json<WasmMeta>>,
+    contract_spec: Option<Json<serde_json::Map<String, serde_json::Value>>>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct WasmMeta {
+    rsver: Option<String>,
+    rssdkver: Option<String>,
+    rssdk_spec_shaking: Option<String>,
+    cliver: Option<String>,
+    source_repo: Option<String>,
+    binver: Option<String>,
+}
+
+pub async fn fetch_wasm_meta(pool: &PgPool, wasm_hash: &str) -> Option<WasmMeta> {
+    let wasm_meta = sqlx::query_as::<_, ExtractedWasmRow>(
+        "SELECT NULL AS contract_spec, contract_meta FROM v1.extracted_wasm_details WHERE wasm_hash = $1",
+    )
+    .bind(wasm_hash)
+    .fetch_optional(pool)
+    .await;
+    match wasm_meta {
+        Ok(Some(row)) => row.contract_meta.map(|data| data.0),
+        Ok(None) => {
+            ::tracing::warn!(wasm_hash, "no wasm binary found");
+            return None;
+        }
+        Err(e) => {
+            log_db_error("fetch_wasm_meta", &e, pool);
+            return None;
+        }
+    }
+}
+
+pub async fn fetch_wasm_spec(
+    pool: &PgPool,
+    wasm_hash: &str,
+) -> Result<Option<serde_json::Map<String, serde_json::Value>>, sqlx::Error> {
+    let wasm_spec = sqlx::query_as::<_, ExtractedWasmRow>(
+        "SELECT contract_spec, NULL as contract_meta FROM v1.extracted_wasm_details WHERE wasm_hash = $1",
+    )
+    .bind(wasm_hash)
+    .fetch_optional(pool)
+    .await;
+
+    match wasm_spec {
+        Ok(Some(row)) => Ok(row.contract_spec.map(|data| data.0)),
+        Ok(None) => {
+            ::tracing::warn!(wasm_hash, "no wasm binary found");
+            return Ok(None);
+        }
+        Err(e) => {
+            log_db_error("fetch_wasm_spec", &e, pool);
+            return Err(e);
+        }
+    }
 }
 
 fn parse_wasm_meta(
@@ -93,7 +154,7 @@ fn parse_wasm_spec(
 
 async fn extract_wasm_details(wasm_hash: &str, pool: web::Data<PgPool>) {
     let is_extracted = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM v1.registered_wasm_details WHERE wasm_hash = $1)",
+        "SELECT EXISTS(SELECT 1 FROM v1.extracted_wasm_details WHERE wasm_hash = $1)",
     )
     .bind(wasm_hash)
     .fetch_one(pool.get_ref())
@@ -172,7 +233,7 @@ async fn extract_wasm_details(wasm_hash: &str, pool: web::Data<PgPool>) {
     };
 
     let insert_result = sqlx::query(
-        "INSERT INTO v1.registered_wasm_details (wasm_hash, contract_spec, contract_meta, ledger_sequence) \
+        "INSERT INTO v1.extracted_wasm_details (wasm_hash, contract_spec, contract_meta, ledger_sequence) \
          VALUES ($1, $2::jsonb, $3::jsonb, $4) \
          ON CONFLICT (wasm_hash) DO NOTHING",
     )
@@ -194,7 +255,7 @@ async fn extract_wasm_details(wasm_hash: &str, pool: web::Data<PgPool>) {
         }
         Err(e) => {
             log_db_error(
-                "extract_wasm_details.insert_registered_wasm_details",
+                "extract_wasm_details.insert_extracted_wasm_details",
                 &e,
                 pool.get_ref(),
             );

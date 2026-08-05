@@ -4,12 +4,11 @@ use serde::{Deserialize, Serialize};
 use serde_qs::actix::QsQuery;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
-use stellar_xdr::curr::{ScMetaEntry, ScMetaV0};
 use tracing_actix_web::{DefaultRootSpanBuilder, RequestId, TracingLogger};
 
-use crate::error::{ErrorResponse, InternalErrorResponse};
+use crate::error::{internal_server_error_response, log_db_error, ErrorResponse};
 use crate::tracing::init_tracing;
-use crate::wasms::wasm_details_webhook;
+use crate::wasms::{fetch_wasm_meta, fetch_wasm_spec, wasm_details_webhook, WasmMeta};
 use crate::webhooks::{load_webhook_config, webhook_auth_middleware};
 mod error;
 mod rate_limit;
@@ -83,16 +82,6 @@ struct WasmDetail {
     row: WasmDetailRow,
     versions: Vec<WasmVersionResult>,
     meta: Option<WasmMeta>,
-}
-
-#[derive(Serialize, Deserialize)]
-pub(crate) struct WasmMeta {
-    rsver: Option<String>,
-    rssdkver: Option<String>,
-    rssdk_spec_shaking: Option<String>,
-    cliver: Option<String>,
-    source_repo: Option<String>,
-    binver: Option<String>,
 }
 
 /// Slim result for /contracts list endpoint
@@ -204,24 +193,6 @@ struct ListResponse<T: Serialize> {
     next: Option<String>,
 }
 
-fn internal_server_error_response(request_id: RequestId) -> HttpResponse {
-    HttpResponse::InternalServerError().json(InternalErrorResponse {
-        error: "Internal server error".into(),
-        request_id: Some(request_id.to_string()),
-    })
-}
-
-fn log_db_error(operation: &'static str, error: &sqlx::Error, pool: &PgPool) {
-    ::tracing::error!(
-        operation,
-        error = %error,
-        error_debug = ?error,
-        pool_size = pool.size(),
-        pool_idle = pool.num_idle(),
-        "database query failed"
-    );
-}
-
 async fn get_wasms(
     pool: web::Data<PgPool>,
     query: QsQuery<QueryParams>,
@@ -302,63 +273,19 @@ async fn get_wasms(
         }
     }
 }
-
-async fn fetch_wasm_meta(pool: &PgPool, wasm_hash: &str) -> Option<WasmMeta> {
-    let wasm_bytes = sqlx::query_scalar::<_, Vec<u8>>(
-        "SELECT decode(wasm, 'hex') FROM archive.wasm_binaries WHERE wasm_hash = $1",
-    )
-    .bind(wasm_hash)
-    .fetch_optional(pool)
-    .await;
-
-    match wasm_bytes {
-        Ok(Some(bytes)) => {
-            let meta = soroban_meta::read::from_wasm(&bytes);
-            match meta {
-                Ok(entries) => {
-                    let mut obj = serde_json::Map::new();
-                    for entry in entries {
-                        let ScMetaEntry::ScMetaV0(ScMetaV0 { key, val }) = entry;
-                        obj.insert(
-                            key.to_utf8_string_lossy(),
-                            serde_json::Value::String(val.to_utf8_string_lossy()),
-                        );
-                    }
-
-                    let wasm_meta =
-                        match serde_json::from_value::<WasmMeta>(serde_json::Value::Object(obj)) {
-                            Ok(m) => m,
-                            Err(e) => {
-                                ::tracing::warn!(
-                                    wasm_hash,
-                                    error = %e,
-                                    error_debug = ?e,
-                                    "failed to deserialize wasm metadata"
-                                );
-                                return None;
-                            }
-                        };
-                    return Some(wasm_meta);
-                }
-                Err(e) => {
-                    ::tracing::warn!(
-                        wasm_hash,
-                        error = %e,
-                        error_debug = ?e,
-                        "failed to read wasm metadata"
-                    );
-                    return None;
-                }
-            }
-        }
-        Ok(None) => {
-            ::tracing::warn!(wasm_hash, "no wasm binary found");
-            return None;
-        }
-        Err(e) => {
-            log_db_error("fetch_wasm_meta.select_wasm_binary", &e, pool);
-            return None;
-        }
+async fn fetch_contract_spec_for_deployment(
+    pool: web::Data<PgPool>,
+    path: web::Path<String>,
+    request_id: RequestId,
+) -> HttpResponse {
+    let wasm_hash = path.into_inner();
+    let wasm_spec = fetch_wasm_spec(pool.get_ref(), &wasm_hash).await;
+    match wasm_spec {
+        Ok(Some(spec)) => HttpResponse::Ok().json(spec),
+        Ok(None) => HttpResponse::NotFound().json(ErrorResponse {
+            error: format!("Wasm with hash {wasm_hash} not found"),
+        }),
+        Err(_) => internal_server_error_response(request_id),
     }
 }
 
@@ -881,6 +808,7 @@ async fn main() -> std::io::Result<()> {
                     .route("", web::get().to(index_v1))
                     .route("/wasms", web::get().to(get_wasms))
                     .route("/wasms/{wasm_name}", web::get().to(get_wasm_root_channel))
+                    .route("/wasms/{wasm_hash}/deploy-spec", web::get().to(fetch_contract_spec_for_deployment))
                     .route(
                         "/wasms/{channel}/{wasm_name}",
                         web::get().to(get_wasm_latest),
