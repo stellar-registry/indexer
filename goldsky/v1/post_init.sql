@@ -210,8 +210,8 @@ LEFT JOIN (
 ) latest ON latest.contract_id = c.contract_id;
 
 -- used to store details extracted from wasm binaries
--- of registered contracts
-CREATE TABLE IF NOT EXISTS registered_wasm_details (
+-- of published wasms
+CREATE TABLE IF NOT EXISTS extracted_wasm_details (
   wasm_hash text NOT NULL PRIMARY KEY,
   contract_spec JSONB,
   contract_meta JSONB,
