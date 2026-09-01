@@ -8,12 +8,14 @@ use tracing_actix_web::{DefaultRootSpanBuilder, RequestId, TracingLogger};
 
 use crate::error::{internal_server_error_response, log_db_error, ErrorResponse};
 use crate::tracing::init_tracing;
+use crate::verification::{fetch_contract_verification, verify_build_webhook, VerificationInfo};
 use crate::wasms::{fetch_wasm_meta, fetch_wasm_spec, wasm_details_webhook, WasmMeta};
 use crate::webhooks::{load_webhook_config, webhook_auth_middleware};
 mod error;
 mod rate_limit;
 mod tracing;
 mod util;
+mod verification;
 mod wasms;
 mod webhooks;
 
@@ -140,13 +142,15 @@ struct ContractVersion {
     created_at: chrono::NaiveDateTime,
 }
 
-/// Wraps ContractDetail with the contract's wasm version history.
+/// Wraps ContractDetail with the contract's wasm version history and its
+/// Stellar Expert verified-build status (if any — see verification.rs).
 /// Flattened so the JSON shape stays a single object.
 #[derive(Serialize)]
 struct ContractDetailResponse {
     #[serde(flatten)]
     detail: ContractDetail,
     versions: Vec<ContractVersion>,
+    verified: Option<VerificationInfo>,
 }
 
 /// From Table "v1.registries"
@@ -581,6 +585,7 @@ async fn fetch_single_contract(
     let Some(contract_id) = detail.contract_id.clone() else {
         return HttpResponse::Ok().json(ContractDetailResponse {
             versions: vec![],
+            verified: None,
             detail,
         });
     };
@@ -597,7 +602,13 @@ async fn fetch_single_contract(
         }
     };
 
-    HttpResponse::Ok().json(ContractDetailResponse { detail, versions })
+    let verified = fetch_contract_verification(pool.get_ref(), &contract_id).await;
+
+    HttpResponse::Ok().json(ContractDetailResponse {
+        detail,
+        versions,
+        verified,
+    })
 }
 
 async fn fetch_versions_for_contract_id(
@@ -799,7 +810,8 @@ async fn main() -> std::io::Result<()> {
             .service(
                 web::scope("/v1/webhooks")
                     .wrap(from_fn(webhook_auth_middleware))
-                    .route("/wasm-details", web::post().to(wasm_details_webhook)),
+                    .route("/wasm-details", web::post().to(wasm_details_webhook))
+                    .route("/verified-build", web::post().to(verify_build_webhook)),
             )
             .service(
                 web::scope("/v1")
@@ -808,7 +820,10 @@ async fn main() -> std::io::Result<()> {
                     .route("", web::get().to(index_v1))
                     .route("/wasms", web::get().to(get_wasms))
                     .route("/wasms/{wasm_name}", web::get().to(get_wasm_root_channel))
-                    .route("/wasms/{wasm_hash}/deploy-spec", web::get().to(fetch_contract_spec_for_deployment))
+                    .route(
+                        "/wasms/{wasm_hash}/deploy-spec",
+                        web::get().to(fetch_contract_spec_for_deployment),
+                    )
                     .route(
                         "/wasms/{channel}/{wasm_name}",
                         web::get().to(get_wasm_latest),

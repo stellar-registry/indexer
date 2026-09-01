@@ -31,8 +31,8 @@ DATABASE_URL=... ./goldsky/scripts/redeploy.sh --number-of-initial-subregistries
 Each network must use its own Postgres database (pipelines write to the
 fixed `v1`/`archive` schemas, so sharing a database would collide) and
 its own Fly app for the HTTP API: `fly-app/fly.toml` is the testnet app,
-`fly-app/fly.mainnet.toml` the mainnet one
-(`fly deploy -c fly.mainnet.toml`).
+`fly-app/fly_mainnet.toml` the mainnet one
+(`fly deploy -c fly_mainnet.toml`).
 
 ## Goldsky-first approach
 Goldsky-first approach uses the rendered `goldsky/rendered/<network>/v1/index.yaml` configuration file as Goldsky pipeline configuration. 

@@ -274,6 +274,14 @@ transforms:
             FROM transform_5_publish_events
             WHERE wasm_hash is NOT NULL
         type: sql
+    transform_6_register_events_contract_id:
+        primary_key: id
+        sql: |-
+            SELECT
+                id, contract_id
+            FROM transform_5_register_events
+            WHERE contract_id is NOT NULL
+        type: sql
 sinks:
     subregistry_events_pg:
         from: transform_3_subregistry_events
@@ -328,4 +336,10 @@ sinks:
         from: transform_6_publish_events_wasm_hash
         secret_name: ${INDEXER_WEBHOOK_SECRET_NAME}
         url: ${INDEXER_WEBHOOK_BASE_URL}/wasm-details
+        one_row_per_request: true
+    verify_build_webhook:
+        type: webhook
+        from: transform_6_register_events_contract_id
+        secret_name: ${INDEXER_WEBHOOK_SECRET_NAME}
+        url: ${INDEXER_WEBHOOK_BASE_URL}/verified-build
         one_row_per_request: true
