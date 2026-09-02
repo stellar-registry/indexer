@@ -216,4 +216,23 @@ CREATE TABLE IF NOT EXISTS extracted_wasm_details (
   contract_spec JSONB,
   contract_meta JSONB,
   ledger_sequence int8
+);
+
+-- Stellar Expert's "verified build" attestation, fetched once per
+-- contract_id (via verify_build_webhook, triggered off `register` events)
+-- rather than on every API request. NULL status/repository/etc. means the
+-- contract was checked and Stellar Expert has no verification for it yet
+-- — checked_at still distinguishes "checked, not verified" from "not
+-- checked yet" (no row).
+-- commit_hash, not "commit" — COMMIT is a SQL keyword, and this is also
+-- clearer about what it holds (a git commit SHA, not a DB transaction).
+CREATE TABLE IF NOT EXISTS contract_verifications (
+  contract_id text NOT NULL PRIMARY KEY,
+  status text,
+  repository text,
+  commit_hash text,
+  package text,
+  path text,
+  checked_at timestamp,
+  ledger_sequence int8
 )

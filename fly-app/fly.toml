@@ -4,6 +4,11 @@ primary_region = 'sjc'
 
 [build]
 
+[env]
+  # Stellar Expert's own network segment naming ("public" for mainnet,
+  # "testnet" otherwise) — see verification.rs's stellar_expert_segment.
+  STELLAR_EXPERT_SEGMENT = 'testnet'
+
 [http_service]
   internal_port = 8080
   force_https = true
