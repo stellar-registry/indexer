@@ -1,0 +1,50 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: test-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ts:
+    name: TypeScript build & test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+
+  rust:
+    name: fly-app build & test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: fly-app
+    steps:
+      - uses: actions/checkout@v5
+
+      # Pinned to match fly-app/Dockerfile's `rust:1.92` base image.
+      - uses: dtolnay/rust-toolchain@1.92
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fly-app
+
+      - run: cargo build --locked --all-targets
+      - run: cargo test --locked
