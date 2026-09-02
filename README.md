@@ -34,6 +34,37 @@ its own Fly app for the HTTP API: `fly-app/fly.toml` is the testnet app,
 `fly-app/fly_mainnet.toml` the mainnet one
 (`fly deploy -c fly_mainnet.toml`).
 
+## Deployment
+
+### Fly (HTTP API)
+Deploy from `fly-app/`, using the [Fly CLI](https://fly.io/docs/flyctl/install/)
+(`fly auth login` first):
+
+```sh
+fly deploy                        # testnet (fly.toml)
+fly deploy -c fly_mainnet.toml    # mainnet
+```
+
+### Goldsky pipelines
+Most pipeline changes (transform SQL, filters, new webhook sinks) only
+need to affect events going forward, and don't need the destructive
+`redeploy.sh` flow described above. Update the running pipeline in
+place instead:
+
+```sh
+./goldsky/scripts/render.sh testnet   # or mainnet
+./goldsky/scripts/turbo.sh apply goldsky/rendered/testnet/v1/index.yaml
+```
+
+`turbo apply` swaps in the new pipeline definition without pausing it,
+dropping tables, or resetting its checkpoint — no reindex, no
+downtime.
+
+Reach for `redeploy.sh` (or the manual "Redeploy Goldsky Pipeline"
+GitHub Action) only when the change needs history reprocessed: a
+new/changed sink column, a lowered `start_at`, or recovering from the
+dynamic-table race described in that script's comments.
+
 ## Goldsky-first approach
 Goldsky-first approach uses the rendered `goldsky/rendered/<network>/v1/index.yaml` configuration file as Goldsky pipeline configuration. 
 It first filters all events that belong to registry contract, then stores raw events (as a backup data).
