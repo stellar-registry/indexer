@@ -12,7 +12,7 @@ pub struct VerifyBuildPayload {
 
 // Stellar Expert attests wasm builds via a GitHub Actions workflow that
 // compiles a contract's source and publishes the resulting hash/repo/commit
-// to their explorer — see https://github.com/stellar-experimental/contract-verifications.
+// to their explorer — see https://github.com/stellar-expert/soroban-build-workflow.
 // `path` is only present when the verified source lives in a subdirectory
 // of the repository (a monorepo); Stellar Expert omits it for a repo-root
 // build, so it's optional here too.
