@@ -59,12 +59,13 @@ psql "$DATABASE_URL" -f goldsky/v1/post_init.sql
 
 3. Ship the API
 
-Deploy from `fly-app/`, using the [Fly CLI](https://fly.io/docs/flyctl/install/)
-(`fly auth login` first):
+Testnet auto-deploys on merge to `main` (wired up in Fly's UI, not a
+GitHub Action here). Mainnet is manual — deploy from `fly-app/` using
+the [Fly CLI](https://fly.io/docs/flyctl/install/) (`fly auth login`
+first):
 
 ```sh
-fly deploy                        # testnet (fly.toml)
-fly deploy -c fly_mainnet.toml    # mainnet
+fly deploy -c fly_mainnet.toml
 ```
 
 ## Goldsky-first approach
