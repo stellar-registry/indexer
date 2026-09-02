@@ -100,7 +100,7 @@ async fn verify_contract(event_id: &str, contract_id: &str, pool: web::Data<PgPo
         }
         Ok(false) => {}
         Err(e) => {
-            log_db_error("verify_contract.exists", &e, pool.get_ref());
+            log_db_error("verify_contract.already_checked", &e, pool.get_ref());
             return;
         }
     }
@@ -157,6 +157,19 @@ async fn verify_contract(event_id: &str, contract_id: &str, pool: web::Data<PgPo
         }
     };
 
+    // `verified` isn't read after this, so consume it by value and
+    // destructure once instead of re-borrowing per field.
+    let (status, repository, commit, package, path) = match verified {
+        Some(v) => (
+            Some(v.status),
+            Some(v.repository),
+            Some(v.commit),
+            Some(v.package),
+            v.path,
+        ),
+        None => (None, None, None, None, None),
+    };
+
     let insert_result = sqlx::query(
         "INSERT INTO v1.contract_verifications \
             (contract_id, status, repository, commit_hash, package, path, checked_at, ledger_sequence) \
@@ -164,11 +177,11 @@ async fn verify_contract(event_id: &str, contract_id: &str, pool: web::Data<PgPo
          ON CONFLICT (contract_id) DO NOTHING",
     )
     .bind(contract_id)
-    .bind(verified.as_ref().map(|v| v.status.as_str()))
-    .bind(verified.as_ref().map(|v| v.repository.as_str()))
-    .bind(verified.as_ref().map(|v| v.commit.as_str()))
-    .bind(verified.as_ref().map(|v| v.package.as_str()))
-    .bind(verified.as_ref().and_then(|v| v.path.as_deref()))
+    .bind(status)
+    .bind(repository)
+    .bind(commit)
+    .bind(package)
+    .bind(path)
     .bind(ledger_sequence)
     .execute(pool.get_ref())
     .await;
