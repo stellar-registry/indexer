@@ -13,15 +13,23 @@ pub struct VerifyBuildPayload {
 // Stellar Expert attests wasm builds via a GitHub Actions workflow that
 // compiles a contract's source and publishes the resulting hash/repo/commit
 // to their explorer — see https://github.com/stellar-expert/soroban-build-workflow.
-// `path` is only present when the verified source lives in a subdirectory
-// of the repository (a monorepo); Stellar Expert omits it for a repo-root
-// build, so it's optional here too.
+// `status` is the only field guaranteed present: Stellar Expert still
+// returns a `validation` object for an unverified contract, just as
+// `{"status": "unverified"}` with repository/commit/package omitted
+// entirely — so all four have to be optional or deserializing that
+// (very common) response fails outright.
+// `path` is additionally only present when the verified source lives in
+// a subdirectory of the repository (a monorepo); Stellar Expert omits it
+// for a repo-root build.
 #[derive(Deserialize, Debug, Clone)]
 struct StellarExpertValidation {
     status: String,
-    repository: String,
-    commit: String,
-    package: String,
+    #[serde(default)]
+    repository: Option<String>,
+    #[serde(default)]
+    commit: Option<String>,
+    #[serde(default)]
+    package: Option<String>,
     #[serde(default)]
     path: Option<String>,
 }
@@ -136,9 +144,8 @@ async fn verify_contract(event_id: &str, contract_id: &str, pool: web::Data<PgPo
         }
     };
 
-    // There's no distinct "unverified" status to check for — the
-    // `validation` key is simply absent from the response otherwise. We
-    // still write a row either way (status NULL when not verified), so
+    // We still write a row either way (status NULL when not verified,
+    // or when Stellar Expert has no record of the contract at all), so
     // the idempotency check above skips this contract on any future
     // replay/retry instead of re-fetching forever.
     let verified = validation.filter(|v| v.status == "verified");
@@ -158,15 +165,11 @@ async fn verify_contract(event_id: &str, contract_id: &str, pool: web::Data<PgPo
     };
 
     // `verified` isn't read after this, so consume it by value and
-    // destructure once instead of re-borrowing per field.
+    // destructure once instead of re-borrowing per field. repository/
+    // commit/package are already Option<String> — verified builds always
+    // carry all three, but there's no need to assert that here.
     let (status, repository, commit, package, path) = match verified {
-        Some(v) => (
-            Some(v.status),
-            Some(v.repository),
-            Some(v.commit),
-            Some(v.package),
-            v.path,
-        ),
+        Some(v) => (Some(v.status), v.repository, v.commit, v.package, v.path),
         None => (None, None, None, None, None),
     };
 
@@ -217,4 +220,54 @@ pub async fn verify_build_webhook(
     });
 
     HttpResponse::Ok().finish()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::StellarExpertContractResponse;
+
+    // Real response shapes from api.stellar.expert/explorer/testnet/contract/{id},
+    // captured while diagnosing why unverified contracts never got a
+    // v1.contract_verifications row.
+    #[test]
+    fn deserializes_unverified_response() {
+        let body = r#"{"contract":"C...","validation":{"status":"unverified"}}"#;
+        let parsed: StellarExpertContractResponse = serde_json::from_str(body).unwrap();
+        let validation = parsed.validation.expect("validation key present");
+        assert_eq!(validation.status, "unverified");
+        assert_eq!(validation.repository, None);
+        assert_eq!(validation.commit, None);
+        assert_eq!(validation.package, None);
+    }
+
+    #[test]
+    fn deserializes_verified_response() {
+        let body = r#"{"contract":"C...","validation":{
+            "status":"verified",
+            "repository":"https://github.com/blend-capital/blend-contracts-v2",
+            "commit":"c19abee5b9be4f49e0cda9057e87d343e5dcc095",
+            "package":"pool-factory",
+            "make":"build",
+            "ts":1744646831
+        }}"#;
+        let parsed: StellarExpertContractResponse = serde_json::from_str(body).unwrap();
+        let validation = parsed.validation.expect("validation key present");
+        assert_eq!(validation.status, "verified");
+        assert_eq!(
+            validation.repository.as_deref(),
+            Some("https://github.com/blend-capital/blend-contracts-v2")
+        );
+        assert_eq!(
+            validation.commit.as_deref(),
+            Some("c19abee5b9be4f49e0cda9057e87d343e5dcc095")
+        );
+        assert_eq!(validation.package.as_deref(), Some("pool-factory"));
+    }
+
+    #[test]
+    fn deserializes_response_with_no_validation_key() {
+        let body = r#"{"contract":"C..."}"#;
+        let parsed: StellarExpertContractResponse = serde_json::from_str(body).unwrap();
+        assert!(parsed.validation.is_none());
+    }
 }
