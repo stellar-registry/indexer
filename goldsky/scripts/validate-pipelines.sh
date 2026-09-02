@@ -2,8 +2,9 @@
 # Renders every network × pipeline combination from the templates and
 # runs `goldsky turbo validate` over each rendered definition.
 # Requires the turbo CLI (install via https://goldsky.com/install) and
-# envsubst. `turbo validate` is an offline YAML schema check — no auth,
-# no network.
+# envsubst. `turbo validate` makes an authenticated call to the Goldsky
+# API (confirmed: it 401s without a valid GOLDSKY_API_KEY, despite
+# never applying anything) — it is not an offline check.
 #
 # Paths handed to turbo.sh are repo-relative so they resolve both when
 # the turbo binary runs directly (turbo.sh cd's to the repo root) and
