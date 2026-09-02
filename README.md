@@ -53,6 +53,8 @@ dynamic-table race described in that script's comments.
 
 2. Update the database with psql
 
+If you made any database changes (likely), apply the database schema.
+
 ```sh
 psql "$DATABASE_URL" -f goldsky/v1/post_init.sql
 ```
