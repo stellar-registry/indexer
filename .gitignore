@@ -1,12 +1,4 @@
-*.js
-!jest.config.js
-*.d.ts
-node_modules
 .env
-
-# CDK asset staging directory
-.cdk.staging
-cdk.out
 
 # rendered per-network Goldsky pipeline definitions (goldsky/scripts/render.sh output)
 goldsky/rendered/
