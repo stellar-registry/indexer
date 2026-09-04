@@ -123,17 +123,13 @@ struct ContractDetail {
     sac: Option<bool>,
 }
 
-/// One published release in a contract's history — a wasm transition (see
-/// v1.versions) whose wasm_hash matched a wasm actually published to the
-/// registry. wasm_name, wasm_version, and wasm_channel come from that join
-/// and are never null for a row that reaches the API: unpublished
-/// transitions are filtered out by fetch_versions_for_contract_id before
-/// they get here (their count is surfaced separately, as
-/// ContractDetailResponse.unpublished_updates). version_index is
-/// renumbered over just this published subset, so it has no gaps even
-/// when unpublished updates sit between releases on-chain. kind is
-/// 'initial' when the release was the contract's deploy wasm, 'upgrade'
-/// when it arrived via a runtime executable_update event.
+/// Row mapping for v1.versions — one row per (contract × wasm transition),
+/// chronologically ordered within a contract. kind is 'initial' for the
+/// deploy row, 'upgrade' for runtime executable_update events. wasm_name,
+/// wasm_version, and wasm_channel come from a join against published_wasms
+/// and the originating registry; all three are NULL for wasms that were
+/// uploaded but never published — the frontend renders those rows using
+/// just wasm_hash, kind, and the dates (see ContractDetailResponse).
 #[derive(sqlx::FromRow, Serialize, Clone)]
 struct ContractVersion {
     version_index: i64,
@@ -147,16 +143,17 @@ struct ContractVersion {
     created_at: chrono::NaiveDateTime,
 }
 
-/// Wraps ContractDetail with the contract's published-version history and
+/// Wraps ContractDetail with the contract's full wasm version history and
 /// its Stellar Expert verified-build status (if any — see verification.rs).
 /// Flattened so the JSON shape stays a single object.
 ///
-/// `versions` only includes wasm transitions that resolve to a published
-/// wasm (see fetch_versions_for_contract_id) — a contract's on-chain code
-/// can change without ever being published to the registry, and those
-/// transitions carry no name/version to show. `unpublished_updates` counts
-/// those so the frontend can say so explicitly instead of the list just
-/// looking short.
+/// `versions` includes every on-chain wasm transition for the contract,
+/// published or not — deliberately: it lets the registry show a contract's
+/// history even predating its own existence. `unpublished_updates` is a
+/// convenience count of how many of those entries have no published
+/// name/version (wasm_name IS NULL), so the frontend can summarize
+/// ("N published versions, M other on-chain updates") without counting
+/// nulls itself.
 #[derive(Serialize)]
 struct ContractDetailResponse {
     #[serde(flatten)]
@@ -639,20 +636,15 @@ async fn fetch_single_contract(
     })
 }
 
-/// Only rows that resolved to a published wasm (wasm_name IS NOT NULL) —
-/// version_index is renumbered from 0 over that subset via ROW_NUMBER, so
-/// the ordering an unfiltered v1.versions row already carries is reused as
-/// the tie-break rather than re-deriving it here.
 async fn fetch_versions_for_contract_id(
     contract_id: &str,
     pool: &PgPool,
 ) -> Result<Vec<ContractVersion>, sqlx::Error> {
     sqlx::query_as::<_, ContractVersion>(
-        "SELECT ROW_NUMBER() OVER (ORDER BY version_index ASC) - 1 AS version_index, \
-                kind, wasm_hash, wasm_name, wasm_version, wasm_channel, \
+        "SELECT version_index, kind, wasm_hash, wasm_name, wasm_version, wasm_channel, \
                 transaction_hash, ledger_sequence, created_at \
          FROM v1.versions \
-         WHERE contract_id = $1 AND wasm_name IS NOT NULL \
+         WHERE contract_id = $1 \
          ORDER BY version_index ASC",
     )
     .bind(contract_id)
@@ -791,8 +783,8 @@ async fn index_v1() -> HttpResponse {
             { "method": "GET", "path": "/v1/wasms/{wasm_name}/v/{version}", "description": "Get a specific version of a wasm (main channel)" },
             { "method": "GET", "path": "/v1/wasms/{channel}/{wasm_name}/v/{version}", "description": "Get a specific version of a wasm for a specific channel. Supported channels: main, unverified" },
             { "method": "GET", "path": "/v1/contracts", "description": "List all deployed contracts (main channel)" },
-            { "method": "GET", "path": "/v1/contracts/{contract_name}", "description": "Get details for a deployed contract (main channel), including its published version history" },
-            { "method": "GET", "path": "/v1/contracts/{channel}/{contract_name}", "description": "Get details for a deployed contract for a specific channel, including its published version history" },
+            { "method": "GET", "path": "/v1/contracts/{contract_name}", "description": "Get details for a deployed contract (main channel), including the wasm version history" },
+            { "method": "GET", "path": "/v1/contracts/{channel}/{contract_name}", "description": "Get details for a deployed contract for a specific channel, including the wasm version history" },
             { "method": "GET", "path": "/v1/registries", "description": "List all known sub-registries announced by the root registry." },
         ]
     }))
