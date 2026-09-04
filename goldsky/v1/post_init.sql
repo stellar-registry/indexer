@@ -22,6 +22,10 @@ CREATE INDEX IF NOT EXISTS wasm_name_trgm_idx_published_wasms ON published_wasms
 -- create trigram index on contract_name
 CREATE INDEX IF NOT EXISTS contract_name_trgm_idx_registered_contracts ON registered_contracts USING GIN (contract_name gin_trgm_ops);
 
+-- support the "latest row for one contract_id / wasm_hash" lookups below
+CREATE INDEX IF NOT EXISTS deployed_contracts_contract_id_idx ON deployed_contracts (contract_id, ledger_sequence DESC);
+CREATE INDEX IF NOT EXISTS published_wasms_wasm_hash_idx ON published_wasms (wasm_hash, ledger_sequence DESC);
+
 -- Channel views: translate emitter_contract_id → friendly channel name
 -- via the registries table.
 
@@ -158,6 +162,11 @@ LEFT JOIN registries r ON r.contract_id = p.emitter_contract_id;
 -- triggered the deploy). Anchored on registered_contracts because the
 -- API addresses contracts by name; deployed-only contracts (deploy
 -- event but no register event) are out of scope.
+--
+-- `deployed` is LATERAL, not an uncorrelated DISTINCT ON, so a
+-- contract_name/channel filter on `registered` can push down to an
+-- indexed per-contract lookup instead of scanning all of
+-- deployed_contracts first (see `contracts_enriched.latest` below).
 
 DROP VIEW IF EXISTS contracts;
 
@@ -175,17 +184,27 @@ SELECT
   deployed.deployer,
   deployed.registry_contract_id
 FROM registered_contracts_with_channel registered
-LEFT JOIN (
-  SELECT DISTINCT ON (contract_id) contract_id, deployer, registry_contract_id
-  FROM deployed_contracts
-  ORDER BY contract_id, ledger_sequence DESC
-) deployed ON deployed.contract_id = registered.contract_id;
+LEFT JOIN LATERAL (
+  SELECT deployer, registry_contract_id
+  FROM deployed_contracts d
+  WHERE d.contract_id = registered.contract_id
+  ORDER BY d.ledger_sequence DESC
+  LIMIT 1
+) deployed ON true;
 
 -- Contracts decorated with the metadata of the wasm they're CURRENTLY
 -- running — the latest version row from v1.versions per contract.
 -- wasm_name / wasm_version / wasm_channel reflect the latest upgrade
 -- (or the initial deploy if the contract has never been upgraded).
 -- Backs /v1/contracts list and /v1/contracts/{name} detail endpoints.
+--
+-- `latest` is LATERAL rather than an uncorrelated DISTINCT ON, which
+-- previously forced a full scan of `versions` — and through it, the
+-- NETWORK-WIDE archive.deploys/archive.upgrades — for every lookup,
+-- regardless of the contract_name/channel filter. Root cause of the
+-- slow-query warning on GET /v1/contracts/{channel}/{name}; LATERAL
+-- lets Postgres push contract_id down into indexed archive scans (see
+-- goldsky/archive/post_init.sql) instead.
 
 CREATE VIEW contracts_enriched AS
 SELECT
@@ -202,12 +221,13 @@ SELECT
   latest.wasm_name,
   latest.wasm_channel
 FROM contracts c
-LEFT JOIN (
-  SELECT DISTINCT ON (contract_id)
-    contract_id, wasm_name, wasm_version, wasm_channel
-  FROM versions
-  ORDER BY contract_id, version_index DESC
-) latest ON latest.contract_id = c.contract_id;
+LEFT JOIN LATERAL (
+  SELECT wasm_version, wasm_name, wasm_channel
+  FROM versions v
+  WHERE v.contract_id = c.contract_id
+  ORDER BY v.version_index DESC
+  LIMIT 1
+) latest ON true;
 
 -- used to store details extracted from wasm binaries
 -- of published wasms
