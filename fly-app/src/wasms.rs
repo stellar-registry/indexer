@@ -40,6 +40,39 @@ pub struct WasmMeta {
     cliver: Option<String>,
     source_repo: Option<String>,
     binver: Option<String>,
+    // SEP-58 build reproducibility fields — see
+    // https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0058.md
+    bldimg: Option<String>,
+    #[serde(default, deserialize_with = "string_or_vec")]
+    bldopt: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "string_or_vec")]
+    bldarg: Option<Vec<String>>,
+    source_sha256: Option<String>,
+    source_uri: Option<String>,
+}
+
+// SEP-58 allows these keys to repeat (and `bldarg` order is significant),
+// so they're stored as arrays rather than last-wins strings.
+const REPEATABLE_META_KEYS: [&str; 2] = ["bldopt", "bldarg"];
+
+// Rows extracted before REPEATABLE_META_KEYS existed hold a plain string.
+fn string_or_vec<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum StringOrVec {
+        One(String),
+        Many(Vec<String>),
+    }
+
+    Ok(
+        Option::<StringOrVec>::deserialize(deserializer)?.map(|v| match v {
+            StringOrVec::One(s) => vec![s],
+            StringOrVec::Many(v) => v,
+        }),
+    )
 }
 
 pub async fn fetch_wasm_meta(pool: &PgPool, wasm_hash: &str) -> Option<WasmMeta> {
@@ -89,22 +122,29 @@ pub async fn fetch_wasm_spec(
 fn parse_wasm_meta(
     wasm: &[u8],
 ) -> Result<serde_json::Map<String, serde_json::Value>, soroban_meta::read::FromWasmError> {
-    let meta = soroban_meta::read::from_wasm(&wasm);
-    match meta {
-        Ok(entries) => {
-            let mut obj = serde_json::Map::new();
-            for entry in entries {
-                let ScMetaEntry::ScMetaV0(ScMetaV0 { key, val }) = entry;
-                obj.insert(
-                    key.to_utf8_string_lossy(),
-                    serde_json::Value::String(val.to_utf8_string_lossy()),
-                );
-            }
+    soroban_meta::read::from_wasm(wasm).map(meta_entries_to_json)
+}
 
-            return Ok(obj);
+fn meta_entries_to_json(
+    entries: impl IntoIterator<Item = ScMetaEntry>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut obj = serde_json::Map::new();
+    for entry in entries {
+        let ScMetaEntry::ScMetaV0(ScMetaV0 { key, val }) = entry;
+        let key = key.to_utf8_string_lossy();
+        let val = serde_json::Value::String(val.to_utf8_string_lossy());
+        if REPEATABLE_META_KEYS.contains(&key.as_str()) {
+            if let serde_json::Value::Array(vals) = obj
+                .entry(key)
+                .or_insert_with(|| serde_json::Value::Array(vec![]))
+            {
+                vals.push(val);
+            }
+        } else {
+            obj.insert(key, val);
         }
-        Err(e) => Err(e),
     }
+    obj
 }
 
 fn parse_wasm_spec(
@@ -275,4 +315,58 @@ pub async fn wasm_details_webhook(
     });
 
     HttpResponse::Ok().finish()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{meta_entries_to_json, WasmMeta};
+    use stellar_xdr::curr::{ScMetaEntry, ScMetaV0};
+
+    fn entry(key: &str, val: &str) -> ScMetaEntry {
+        ScMetaEntry::ScMetaV0(ScMetaV0 {
+            key: key.try_into().unwrap(),
+            val: val.try_into().unwrap(),
+        })
+    }
+
+    #[test]
+    fn repeated_sep58_keys_keep_every_value_in_order() {
+        let obj = meta_entries_to_json([
+            entry("rsver", "1.89.0"),
+            entry("bldarg", "contract"),
+            entry("bldopt", "--profile=release"),
+            entry("bldarg", "build"),
+            entry("bldopt", "--locked"),
+        ]);
+        assert_eq!(
+            serde_json::Value::Object(obj),
+            serde_json::json!({
+                "rsver": "1.89.0",
+                "bldarg": ["contract", "build"],
+                "bldopt": ["--profile=release", "--locked"],
+            })
+        );
+    }
+
+    #[test]
+    fn deserializes_sep58_fields() {
+        let meta: WasmMeta = serde_json::from_value(serde_json::json!({
+            "bldimg": "docker.io/stellar/stellar-cli@sha256:abc",
+            "bldopt": ["--locked"],
+            "source_sha256": "28a1",
+            "source_uri": "https://example.com/src.tar.gz",
+        }))
+        .unwrap();
+        assert_eq!(meta.bldopt, Some(vec!["--locked".to_string()]));
+        assert_eq!(meta.bldarg, None);
+        assert_eq!(meta.source_sha256.as_deref(), Some("28a1"));
+    }
+
+    // Rows extracted before bldopt/bldarg were stored as arrays.
+    #[test]
+    fn deserializes_legacy_single_string_bldopt() {
+        let meta: WasmMeta =
+            serde_json::from_value(serde_json::json!({ "bldopt": "--locked" })).unwrap();
+        assert_eq!(meta.bldopt, Some(vec!["--locked".to_string()]));
+    }
 }
