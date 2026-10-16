@@ -833,6 +833,7 @@ dependencies = [
  "soroban-spec",
  "sqlx",
  "stellar-xdr",
+ "subtle",
  "tokio",
  "tracing",
  "tracing-actix-web",

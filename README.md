@@ -82,3 +82,20 @@ and data would need to be backfilled.
 and serves the registry API. It doesn't do any data processing itself —
 just reads what the pipeline has already written. See `fly-app/fly.toml`
 / `fly-app/fly_mainnet.toml` for the per-network deploy config.
+
+### API keys
+On Fly, `/v1` is rate limited per client IP (1 request per 2s, burst of 5).
+Trusted crawlers can skip the limit by sending an `x-api-key` header with a
+key listed in the `INDEXER_API_KEYS` secret (comma-separated, so a new key
+can be added before the old one is removed). A request with an unrecognized
+key gets `401`; requests without the header are unaffected. Set keys per
+app:
+
+```sh
+KEY=$(openssl rand -hex 32)   # share this with the crawler
+fly secrets set INDEXER_API_KEYS="$KEY" -c fly-app/fly.toml          # testnet
+fly secrets set INDEXER_API_KEYS="$KEY" -c fly-app/fly_mainnet.toml  # mainnet
+```
+
+Setting a secret restarts the app. To rotate, set both keys
+(`old,new`), hand out the new one, then set just `new`.
