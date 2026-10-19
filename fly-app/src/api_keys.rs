@@ -4,17 +4,17 @@ use actix_web::{
     middleware::Next,
     web, Error, HttpMessage, HttpResponse,
 };
+use secrecy::{ExposeSecret, SecretString};
 use std::env;
 use subtle::ConstantTimeEq;
 
 const API_KEYS_ENV: &str = "INDEXER_API_KEYS";
 const API_KEY_HEADER: &str = "x-api-key";
 
-// No Debug derive so keys can't end up in logs.
 #[derive(Clone, Default)]
 pub(crate) struct ApiKeyConfig {
     // (consumer name, key)
-    keys: Vec<(String, String)>,
+    keys: Vec<(String, SecretString)>,
 }
 
 /// Marks a request as carrying a valid API key; the rate limiter skips these.
@@ -36,7 +36,7 @@ impl ApiKeyConfig {
             }
             match entry.split_once(':').map(|(n, k)| (n.trim(), k.trim())) {
                 Some((name, key)) if !name.is_empty() && !key.is_empty() => {
-                    keys.push((name.to_string(), key.to_string()))
+                    keys.push((name.to_string(), SecretString::from(key)))
                 }
                 // Report the position only; the entry itself may be a key.
                 _ => return Err(format!("{API_KEYS_ENV} entry {i} must be `name:key`")),
@@ -53,7 +53,7 @@ impl ApiKeyConfig {
     fn consumer(&self, provided: &[u8]) -> Option<&str> {
         let mut matched = None;
         for (name, key) in &self.keys {
-            if bool::from(key.as_bytes().ct_eq(provided)) {
+            if bool::from(key.expose_secret().as_bytes().ct_eq(provided)) {
                 matched = Some(name.as_str());
             }
         }
