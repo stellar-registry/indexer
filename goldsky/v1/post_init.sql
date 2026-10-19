@@ -104,6 +104,11 @@ LEFT JOIN published_wasms p ON p.wasm_hash = u.wasm_hash;
 -- against published_wasms (and through it to registries). All three
 -- are NULL when the wasm was uploaded but never published.
 
+-- The change-feed views below depend on versions, so they go first.
+DROP VIEW IF EXISTS changes;
+DROP VIEW IF EXISTS contract_registrations;
+DROP VIEW IF EXISTS contract_name_events;
+DROP VIEW IF EXISTS contract_name_history;
 DROP VIEW IF EXISTS contracts_enriched;
 DROP VIEW IF EXISTS versions;
 
@@ -235,4 +240,178 @@ CREATE TABLE IF NOT EXISTS contract_verifications (
   path text,
   checked_at timestamp,
   ledger_sequence int8
+);
+
+-- ── /v1/changes feed ────────────────────────────────────────────────
+--
+-- Registry entries are keyed by name, and names move: `rename` moves an
+-- entry to a new name, and `update_address` / `update_owner` refer to
+-- the entry by whatever name it has at that point. A registration
+-- (its `register` event id) is the stable identity; these views fold
+-- the name-keyed events onto it.
+
+-- Each registration's name over time: one row per name it has held,
+-- [since, until) in (ledger_sequence, id) order. A rename applies to
+-- the registration holding old_name when the rename happened, so the
+-- chain follows the first rename of the current name after taking it.
+CREATE VIEW contract_name_history AS
+WITH RECURSIVE chain AS (
+  SELECT
+    r.id AS registration_id,
+    r.emitter_contract_id,
+    r.contract_name AS name,
+    r.ledger_sequence,
+    r.id AS since_id,
+    0 AS step
+  FROM registered_contracts r
+  UNION ALL
+  SELECT
+    c.registration_id,
+    c.emitter_contract_id,
+    n.new_name,
+    n.ledger_sequence,
+    n.id,
+    c.step + 1
+  FROM chain c
+  CROSS JOIN LATERAL (
+    SELECT x.new_name, x.ledger_sequence, x.id
+    FROM rename x
+    WHERE x.emitter_contract_id = c.emitter_contract_id
+      AND x.old_name = c.name
+      AND (x.ledger_sequence, x.id) > (c.ledger_sequence, c.since_id)
+    ORDER BY x.ledger_sequence, x.id
+    LIMIT 1
+  ) n
 )
+SELECT
+  registration_id,
+  emitter_contract_id,
+  name,
+  ledger_sequence AS since_ledger,
+  since_id,
+  LEAD(ledger_sequence) OVER w AS until_ledger,
+  LEAD(since_id) OVER w AS until_id
+FROM chain
+WINDOW w AS (PARTITION BY registration_id ORDER BY step);
+
+-- update_address / update_owner events, attributed to the registration
+-- that held contract_name when the event happened.
+CREATE VIEW contract_name_events AS
+SELECT
+  e.id,
+  e.ledger_sequence,
+  e.created_at,
+  e.transaction_hash,
+  e.emitter_contract_id,
+  e.type,
+  e.contract_name,
+  e.value,
+  h.registration_id
+FROM (
+  SELECT id, ledger_sequence, created_at, transaction_hash, emitter_contract_id,
+         'update_address'::text AS type, contract_name, new_address AS value
+  FROM update_address
+  UNION ALL
+  SELECT id, ledger_sequence, created_at, transaction_hash, emitter_contract_id,
+         'update_owner'::text, contract_name, new_owner
+  FROM update_owner
+) e
+LEFT JOIN contract_name_history h
+  ON h.emitter_contract_id = e.emitter_contract_id
+ AND h.name = e.contract_name
+ AND (h.since_ledger, h.since_id) < (e.ledger_sequence, e.id)
+ AND (h.until_id IS NULL OR (e.ledger_sequence, e.id) < (h.until_ledger, h.until_id));
+
+-- Current state of every registration. owner is NULL until an
+-- update_owner event: `register` doesn't emit the initial owner.
+CREATE VIEW contract_registrations AS
+SELECT
+  r.id AS registration_id,
+  ch.registry_channel AS channel,
+  cur.name AS contract_name,
+  COALESCE(addr.value, r.contract_id) AS contract_id,
+  own.value AS owner,
+  r.sac,
+  dep.deployer,
+  latest.wasm_hash,
+  latest.wasm_name,
+  latest.wasm_version,
+  latest.wasm_channel
+FROM registered_contracts r
+JOIN registries ch ON ch.contract_id = r.emitter_contract_id
+JOIN contract_name_history cur
+  ON cur.registration_id = r.id AND cur.until_id IS NULL
+LEFT JOIN LATERAL (
+  SELECT value FROM contract_name_events
+  WHERE registration_id = r.id AND type = 'update_address'
+  ORDER BY ledger_sequence DESC, id DESC
+  LIMIT 1
+) addr ON true
+LEFT JOIN LATERAL (
+  SELECT value FROM contract_name_events
+  WHERE registration_id = r.id AND type = 'update_owner'
+  ORDER BY ledger_sequence DESC, id DESC
+  LIMIT 1
+) own ON true
+LEFT JOIN LATERAL (
+  SELECT deployer FROM deployed_contracts
+  WHERE contract_id = r.contract_id
+  ORDER BY ledger_sequence DESC
+  LIMIT 1
+) dep ON true
+LEFT JOIN LATERAL (
+  SELECT wasm_hash, wasm_name, wasm_version, wasm_channel
+  FROM versions
+  WHERE contract_id = COALESCE(addr.value, r.contract_id)
+  ORDER BY version_index DESC
+  LIMIT 1
+) latest ON true;
+
+-- One row per registry event, in feed order (ledger_sequence, id).
+-- `event` is the event's own payload; the API joins the current state
+-- of the affected Wasm (by wasm_hash) or contract (by registration_id).
+CREATE VIEW changes AS
+SELECT id, ledger_sequence, created_at, transaction_hash, emitter_contract_id,
+       'publish'::text AS type, wasm_hash, NULL::text AS registration_id,
+       jsonb_build_object(
+         'wasm_name', wasm_name, 'wasm_version', wasm_version,
+         'wasm_hash', wasm_hash, 'author', author
+       ) AS event
+FROM published_wasms
+UNION ALL
+SELECT id, ledger_sequence, created_at, transaction_hash, emitter_contract_id,
+       'register', NULL, id,
+       jsonb_build_object(
+         'contract_name', contract_name, 'contract_id', contract_id,
+         'sac', sac, 'wasm_hash', wasm_hash
+       )
+FROM registered_contracts
+UNION ALL
+-- A registry deploy also registers the name in the same transaction.
+SELECT d.id, d.ledger_sequence, d.created_at, d.transaction_hash, d.emitter_contract_id,
+       'deploy', NULL, reg.id,
+       jsonb_build_object(
+         'wasm_name', d.wasm_name, 'wasm_version', d.wasm_version,
+         'deployer', d.deployer, 'contract_id', d.contract_id
+       )
+FROM deployed_contracts d
+LEFT JOIN LATERAL (
+  SELECT r.id FROM registered_contracts r
+  WHERE r.contract_id = d.contract_id
+  ORDER BY (r.transaction_hash = d.transaction_hash) DESC, r.ledger_sequence DESC
+  LIMIT 1
+) reg ON true
+UNION ALL
+SELECT x.id, x.ledger_sequence, x.created_at, x.transaction_hash, x.emitter_contract_id,
+       'rename', NULL, h.registration_id,
+       jsonb_build_object('old_name', x.old_name, 'new_name', x.new_name)
+FROM rename x
+LEFT JOIN contract_name_history h ON h.since_id = x.id
+UNION ALL
+SELECT id, ledger_sequence, created_at, transaction_hash, emitter_contract_id,
+       type, NULL, registration_id,
+       jsonb_build_object(
+         'contract_name', contract_name,
+         CASE type WHEN 'update_address' THEN 'new_address' ELSE 'new_owner' END, value
+       )
+FROM contract_name_events;

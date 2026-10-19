@@ -82,3 +82,29 @@ and data would need to be backfilled.
 and serves the registry API. It doesn't do any data processing itself —
 just reads what the pipeline has already written. See `fly-app/fly.toml`
 / `fly-app/fly_mainnet.toml` for the per-network deploy config.
+
+### Change feed (`/v1/changes`)
+`GET /v1/changes?order=asc|desc&limit=1-200&cursor=<event id>` lists every
+registry event (`publish`, `deploy`, `register`, `rename`,
+`update_address`, `update_owner`) in `(ledger, id)` order, so external
+indexers can bulk-load the Registry and stay in sync. Each entry has the
+event's own payload (`event`) plus the *current* state of the Wasm
+(`wasm`) or contract (`contract`) it affected. Contracts are identified by
+`contract.registration_id` (the id of their `register` event), which stays
+the same through renames and address changes; upsert on it.
+
+Only ledgers up to `current_through` are served. That's the pipeline's
+index height (`v1.index_height`, a heartbeat sink in the v1 pipeline) minus
+a 12-ledger settle margin, so an event can't land behind a client's cursor
+during normal operation. Ascending responses always return `next` (the last
+id, or the cursor you sent), so poll with it. If `current_through` drops
+below your cursor's ledger, the pipeline was replayed (e.g.
+`refresh.sh`); resync from the start.
+
+The views behind it live in `goldsky/v1/post_init.sql`. To test against a
+local Postgres (the test drops and recreates the `v1`/`archive` schemas):
+
+```sh
+createdb registry_test
+TEST_DATABASE_URL=postgres:///registry_test cargo test   # in fly-app/
+```
