@@ -805,7 +805,7 @@ async fn main() -> std::io::Result<()> {
     ::tracing::info!(
         port,
         webhook_auth_enabled = webhook_config.enabled(),
-        api_keys = api_key_config.len(),
+        api_consumers = ?api_key_config.names(),
         pool_size = pool.size(),
         pool_idle = pool.num_idle(),
         "starting server"

@@ -85,17 +85,20 @@ just reads what the pipeline has already written. See `fly-app/fly.toml`
 
 ### API keys
 On Fly, `/v1` is rate limited per client IP (1 request per 2s, burst of 5).
-Trusted crawlers can skip the limit by sending an `x-api-key` header with a
-key listed in the `INDEXER_API_KEYS` secret (comma-separated, so a new key
-can be added before the old one is removed). A request with an unrecognized
-key gets `401`; requests without the header are unaffected. Set keys per
-app:
+Trusted consumers can skip the limit by sending an `x-api-key` header with a
+key listed in the `INDEXER_API_KEYS` secret, a comma-separated list of
+`name:key` entries. The name identifies the consumer: each keyed request logs
+it as `api_consumer`, and startup logs the configured names (never the keys).
+A request with an unrecognized key gets `401`; requests without the header are
+unaffected. A malformed entry stops the app at startup.
 
 ```sh
-KEY=$(openssl rand -hex 32)   # share this with the crawler
-fly secrets set INDEXER_API_KEYS="$KEY" -c fly-app/fly.toml          # testnet
-fly secrets set INDEXER_API_KEYS="$KEY" -c fly-app/fly_mainnet.toml  # mainnet
+KEY=$(openssl rand -hex 32)   # share this with the consumer
+fly secrets set INDEXER_API_KEYS="orbitlens:$KEY" -c fly-app/fly.toml          # testnet
+fly secrets set INDEXER_API_KEYS="orbitlens:$KEY" -c fly-app/fly_mainnet.toml  # mainnet
 ```
 
-Setting a secret restarts the app. To rotate, set both keys
-(`old,new`), hand out the new one, then set just `new`.
+To add a consumer, append an entry (`orbitlens:...,lobstr:...`); to revoke
+one, set the list without it. To rotate a key, add a second entry for the same
+name, hand out the new key, then remove the old entry. Setting a secret
+restarts the app.

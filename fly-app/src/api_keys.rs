@@ -13,7 +13,8 @@ const API_KEY_HEADER: &str = "x-api-key";
 // No Debug derive so keys can't end up in logs.
 #[derive(Clone, Default)]
 pub(crate) struct ApiKeyConfig {
-    keys: Vec<String>,
+    // (consumer name, key)
+    keys: Vec<(String, String)>,
 }
 
 /// Marks a request as carrying a valid API key; the rate limiter skips these.
@@ -22,29 +23,41 @@ pub(crate) struct ApiKeyAuthorized;
 
 pub fn load_api_key_config() -> ApiKeyConfig {
     let raw = env::var(API_KEYS_ENV).unwrap_or_default();
-    ApiKeyConfig::from_csv(&raw)
+    ApiKeyConfig::parse(&raw).unwrap_or_else(|e| panic!("{e}"))
 }
 
 impl ApiKeyConfig {
-    fn from_csv(raw: &str) -> Self {
-        let keys = raw
-            .split(',')
-            .map(str::trim)
-            .filter(|k| !k.is_empty())
-            .map(String::from)
-            .collect();
-        ApiKeyConfig { keys }
+    /// Parses `name:key,name:key`.
+    fn parse(raw: &str) -> Result<Self, String> {
+        let mut keys = Vec::new();
+        for (i, entry) in raw.split(',').map(str::trim).enumerate() {
+            if entry.is_empty() {
+                continue;
+            }
+            match entry.split_once(':').map(|(n, k)| (n.trim(), k.trim())) {
+                Some((name, key)) if !name.is_empty() && !key.is_empty() => {
+                    keys.push((name.to_string(), key.to_string()))
+                }
+                // Report the position only; the entry itself may be a key.
+                _ => return Err(format!("{API_KEYS_ENV} entry {i} must be `name:key`")),
+            }
+        }
+        Ok(ApiKeyConfig { keys })
     }
 
-    pub fn len(&self) -> usize {
-        self.keys.len()
+    pub fn names(&self) -> Vec<&str> {
+        self.keys.iter().map(|(name, _)| name.as_str()).collect()
     }
 
     // Checks every key without short-circuiting so timing doesn't reveal which one matched.
-    fn is_valid(&self, provided: &[u8]) -> bool {
-        self.keys.iter().fold(0u8, |acc, key| {
-            acc | key.as_bytes().ct_eq(provided).unwrap_u8()
-        }) == 1
+    fn consumer(&self, provided: &[u8]) -> Option<&str> {
+        let mut matched = None;
+        for (name, key) in &self.keys {
+            if bool::from(key.as_bytes().ct_eq(provided)) {
+                matched = Some(name.as_str());
+            }
+        }
+        matched
     }
 }
 
@@ -56,15 +69,17 @@ pub async fn api_key_middleware<B: MessageBody>(
         return Ok(next.call(req).await?.map_into_left_body());
     };
 
-    let authorized = req
+    let consumer = req
         .app_data::<web::Data<ApiKeyConfig>>()
-        .is_some_and(|cfg| cfg.is_valid(provided.as_bytes()));
+        .and_then(|cfg| cfg.consumer(provided.as_bytes()));
 
-    if !authorized {
+    let Some(consumer) = consumer else {
         return Ok(req
             .into_response(HttpResponse::Unauthorized().finish())
             .map_into_right_body());
-    }
+    };
+
+    ::tracing::info!(api_consumer = consumer, "api key request");
 
     req.extensions_mut().insert(ApiKeyAuthorized);
     Ok(next.call(req).await?.map_into_left_body())
@@ -77,21 +92,29 @@ mod tests {
     use actix_web::{http::StatusCode, middleware::from_fn, test as actix_test, App};
 
     #[test]
-    fn parses_comma_separated_keys() {
-        let cfg = ApiKeyConfig::from_csv(" key-a, ,key-b ,");
-        assert_eq!(cfg.len(), 2);
-        assert!(cfg.is_valid(b"key-a"));
-        assert!(cfg.is_valid(b"key-b"));
-        assert!(!cfg.is_valid(b"key-"));
-        assert!(!cfg.is_valid(b""));
-        assert!(!ApiKeyConfig::from_csv("").is_valid(b""));
+    fn parses_named_keys() {
+        let cfg = ApiKeyConfig::parse(" a:key-a, ,b : key-b ,").unwrap();
+        assert_eq!(cfg.names(), ["a", "b"]);
+        assert_eq!(cfg.consumer(b"key-a"), Some("a"));
+        assert_eq!(cfg.consumer(b"key-b"), Some("b"));
+        assert_eq!(cfg.consumer(b"key-"), None);
+        assert_eq!(cfg.consumer(b""), None);
+        assert_eq!(ApiKeyConfig::parse("").unwrap().consumer(b""), None);
+    }
+
+    #[test]
+    fn rejects_malformed_entries_without_echoing_them() {
+        for raw in ["a:key-a,secret", "a:key-a,:secret", "a:"] {
+            let err = ApiKeyConfig::parse(raw).err().unwrap();
+            assert!(!err.contains("secret") && !err.contains("key-a"), "{err}");
+        }
     }
 
     macro_rules! app {
         ($keys:expr, $burst:expr) => {
             actix_test::init_service(
                 App::new()
-                    .app_data(web::Data::new(ApiKeyConfig::from_csv($keys)))
+                    .app_data(web::Data::new(ApiKeyConfig::parse($keys).unwrap()))
                     .service(
                         web::scope("/v1")
                             .wrap(rate_limit::governor(60, $burst))
@@ -115,7 +138,7 @@ mod tests {
 
     #[actix_web::test]
     async fn rejects_unknown_key() {
-        let app = app!("key-a", 5);
+        let app = app!("a:key-a", 5);
         let resp = actix_test::call_service(&app, request(Some("nope")).to_request()).await;
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     }
@@ -129,7 +152,7 @@ mod tests {
 
     #[actix_web::test]
     async fn keyless_requests_are_rate_limited() {
-        let app = app!("key-a", 1);
+        let app = app!("a:key-a", 1);
         let first = actix_test::call_service(&app, request(None).to_request()).await;
         assert_eq!(first.status(), StatusCode::OK);
         let second = actix_test::call_service(&app, request(None).to_request()).await;
@@ -138,7 +161,7 @@ mod tests {
 
     #[actix_web::test]
     async fn valid_keys_bypass_rate_limit() {
-        let app = app!("key-a,key-b", 1);
+        let app = app!("a:key-a,b:key-b", 1);
         for key in ["key-a", "key-b", "key-a", "key-b"] {
             let resp = actix_test::call_service(&app, request(Some(key)).to_request()).await;
             assert_eq!(resp.status(), StatusCode::OK);
