@@ -6,6 +6,7 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use tracing_actix_web::{DefaultRootSpanBuilder, RequestId, TracingLogger};
 
+use crate::api_keys::{api_key_middleware, load_api_key_config};
 use crate::error::{internal_server_error_response, log_db_error, ErrorResponse};
 use crate::tracing::init_tracing;
 use crate::verification::{
@@ -13,6 +14,7 @@ use crate::verification::{
 };
 use crate::wasms::{fetch_wasm_meta, fetch_wasm_spec, wasm_details_webhook, WasmMeta};
 use crate::webhooks::{load_webhook_config, webhook_auth_middleware};
+mod api_keys;
 mod error;
 mod rate_limit;
 mod tracing;
@@ -796,12 +798,14 @@ async fn main() -> std::io::Result<()> {
         .expect("PORT must be a valid number");
 
     let webhook_config = load_webhook_config();
+    let api_key_config = load_api_key_config();
 
     init_tracing();
 
     ::tracing::info!(
         port,
         webhook_auth_enabled = webhook_config.enabled(),
+        api_consumers = ?api_key_config.names(),
         pool_size = pool.size(),
         pool_idle = pool.num_idle(),
         "starting server"
@@ -813,6 +817,7 @@ async fn main() -> std::io::Result<()> {
             .wrap(tracing_middleware)
             .app_data(web::Data::new(pool.clone()))
             .app_data(web::Data::new(webhook_config.clone()))
+            .app_data(web::Data::new(api_key_config.clone()))
             .route("/", web::get().to(index))
             .service(
                 web::scope("/v1/webhooks")
@@ -824,6 +829,8 @@ async fn main() -> std::io::Result<()> {
                 web::scope("/v1")
                     // add rate-limiter only when deployed to fly.io as it fetches a fly-specific header
                     .wrap(rate_limit::middleware())
+                    // outermost, so it marks keyed requests before the rate limiter sees them
+                    .wrap(from_fn(api_key_middleware))
                     .route("", web::get().to(index_v1))
                     .route("/wasms", web::get().to(get_wasms))
                     .route("/wasms/{wasm_name}", web::get().to(get_wasm_root_channel))
