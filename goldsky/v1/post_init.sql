@@ -359,13 +359,19 @@ LEFT JOIN LATERAL (
   ORDER BY ledger_sequence DESC
   LIMIT 1
 ) dep ON true
-LEFT JOIN LATERAL (
-  SELECT wasm_hash, wasm_name, wasm_version, wasm_channel
+-- One pass over versions for just the addresses registrations point at;
+-- a per-row LATERAL here rescans archive.deploys for every registration.
+LEFT JOIN (
+  SELECT DISTINCT ON (contract_id)
+    contract_id, wasm_hash, wasm_name, wasm_version, wasm_channel
   FROM versions
-  WHERE contract_id = COALESCE(addr.value, r.contract_id)
-  ORDER BY version_index DESC
-  LIMIT 1
-) latest ON true;
+  WHERE contract_id IN (
+    SELECT contract_id FROM registered_contracts
+    UNION
+    SELECT new_address FROM update_address
+  )
+  ORDER BY contract_id, version_index DESC
+) latest ON latest.contract_id = COALESCE(addr.value, r.contract_id);
 
 -- One row per registry event, in feed order (ledger_sequence, id).
 -- `event` is the event's own payload; the API joins the current state

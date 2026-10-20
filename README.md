@@ -112,6 +112,8 @@ event's own payload (`event`) plus the *current* state of the Wasm
 (`wasm`) or contract (`contract`) it affected. Contracts are identified by
 `contract.registration_id` (the id of their `register` event), which stays
 the same through renames and address changes; upsert on it.
+Within a ledger, entries are ordered by event id, which sorts by transaction
+hash rather than application order.
 `contract` is null for a `deploy` that didn't register a name in an
 indexed registry (an unnamed deploy, or a name registered in someone's own
 registry instance); the event still carries the deployed `contract_id`.
