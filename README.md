@@ -102,3 +102,38 @@ To add a consumer, append an entry (`orbitlens:...,lobstr:...`); to revoke
 one, set the list without it. To rotate a key, add a second entry for the same
 name, hand out the new key, then remove the old entry. Setting a secret
 restarts the app.
+
+### Change feed (`/v1/changes`)
+`GET /v1/changes?order=asc|desc&limit=1-200&cursor=<event id>` lists every
+registry event (`publish`, `deploy`, `register`, `rename`,
+`update_address`, `update_owner`) in `(ledger, id)` order, so external
+indexers can bulk-load the Registry and stay in sync. Each entry has the
+event's own payload (`event`) plus the *current* state of the Wasm
+(`wasm`) or contract (`contract`) it affected. Contracts are identified by
+`contract.registration_id` (the id of their `register` event), which stays
+the same through renames and address changes; upsert on it.
+Within a ledger, entries are ordered by event id, which sorts by transaction
+hash rather than application order.
+`contract` is null for a `deploy` that didn't register a name in an
+indexed registry (an unnamed deploy, or a name registered in someone's own
+registry instance); the event still carries the deployed `contract_id`.
+
+Only ledgers up to `current_through` are served. That's the pipeline's
+index height (`v1.index_height`, a heartbeat sink in the v1 pipeline) minus
+a 12-ledger settle margin, so an event can't land behind a client's cursor
+during normal operation. Ascending responses always return `next` (the last
+id, or the cursor you sent), so poll with it. If `current_through` drops
+below your cursor's ledger, the pipeline was replayed (e.g.
+`refresh.sh`); resync from the start.
+
+`GET /v1/index-height` returns that raw height (`ledger`, `closed_at`)
+without the margin, e.g. for showing how far the index is behind the
+network.
+
+The views behind it live in `goldsky/v1/post_init.sql`. To test against a
+local Postgres (the test drops and recreates the `v1`/`archive` schemas):
+
+```sh
+createdb registry_test
+TEST_DATABASE_URL=postgres:///registry_test cargo test   # in fly-app/
+```

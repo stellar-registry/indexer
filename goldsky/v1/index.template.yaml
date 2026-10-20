@@ -27,6 +27,20 @@ transforms:
                     'sub_reg'
                   )
         type: sql
+    # Single-row index height for /v1/changes. Taken from the same event
+    # stream as the registry events (not the ledgers dataset, which can run
+    # ahead of it), so it only advances as fast as the events do. Filtered
+    # to one event per Soroban transaction to keep the upserts cheap.
+    transform_index_height:
+        primary_key: id
+        sql: |-
+            SELECT
+              'v1' AS id,
+              ledger_sequence,
+              ledger_closed_at AS closed_at
+            FROM goldsky_source
+            WHERE id LIKE '%-op-0-event-0'
+        type: sql
     transform_2_events_with_name_raw:
         primary_key: id
         sql: |-
@@ -300,6 +314,12 @@ sinks:
         schema: v1
         secret_name: ${PG_SECRET_NAME}
         table: published_wasms
+        type: postgres
+    index_height_pg:
+        from: transform_index_height
+        schema: v1
+        secret_name: ${PG_SECRET_NAME}
+        table: index_height
         type: postgres
     raw_events_backup:
         from: transform_2_events_with_name_raw
