@@ -83,6 +83,26 @@ and serves the registry API. It doesn't do any data processing itself —
 just reads what the pipeline has already written. See `fly-app/fly.toml`
 / `fly-app/fly_mainnet.toml` for the per-network deploy config.
 
+### API keys
+On Fly, `/v1` is rate limited per client IP (1 request per 2s, burst of 5).
+Trusted consumers can skip the limit by sending an `x-api-key` header with a
+key listed in the `INDEXER_API_KEYS` secret, a comma-separated list of
+`name:key` entries. The name identifies the consumer: each keyed request logs
+it as `api_consumer`, and startup logs the configured names (never the keys).
+A request with an unrecognized key gets `401`; requests without the header are
+unaffected. A malformed entry stops the app at startup.
+
+```sh
+KEY=$(openssl rand -hex 32)   # share this with the consumer
+fly secrets set INDEXER_API_KEYS="orbitlens:$KEY" -c fly-app/fly.toml          # testnet
+fly secrets set INDEXER_API_KEYS="orbitlens:$KEY" -c fly-app/fly_mainnet.toml  # mainnet
+```
+
+To add a consumer, append an entry (`orbitlens:...,lobstr:...`); to revoke
+one, set the list without it. To rotate a key, add a second entry for the same
+name, hand out the new key, then remove the old entry. Setting a secret
+restarts the app.
+
 ### Change feed (`/v1/changes`)
 `GET /v1/changes?order=asc|desc&limit=1-200&cursor=<event id>` lists every
 registry event (`publish`, `deploy`, `register`, `rename`,
