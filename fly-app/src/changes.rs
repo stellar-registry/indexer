@@ -91,6 +91,33 @@ async fn current_through(pool: &PgPool) -> Result<Option<i64>, sqlx::Error> {
     Ok(height.map(|h| (h - SETTLE_LEDGERS).max(0)))
 }
 
+#[derive(sqlx::FromRow, Serialize)]
+struct IndexHeight {
+    #[serde(rename = "ledger")]
+    ledger_sequence: i64,
+    closed_at: chrono::NaiveDateTime,
+}
+
+/// Latest ledger the pipeline has processed, without the feed's settle margin.
+pub async fn get_index_height(pool: web::Data<PgPool>, request_id: RequestId) -> HttpResponse {
+    let row = sqlx::query_as::<_, IndexHeight>(
+        "SELECT ledger_sequence, closed_at FROM v1.index_height WHERE id = 'v1'",
+    )
+    .fetch_optional(pool.get_ref())
+    .await;
+
+    match row {
+        Ok(Some(height)) => HttpResponse::Ok().json(height),
+        Ok(None) => HttpResponse::ServiceUnavailable().json(ErrorResponse {
+            error: "Index height not available yet".into(),
+        }),
+        Err(e) => {
+            log_db_error("get_index_height", &e, pool.get_ref());
+            internal_server_error_response(request_id)
+        }
+    }
+}
+
 pub async fn get_changes(
     pool: web::Data<PgPool>,
     query: web::Query<ChangesParams>,
@@ -251,17 +278,16 @@ mod tests {
             Some(pool)
         }
 
-        async fn get(pool: &PgPool, query: &str) -> (StatusCode, Value) {
+        async fn get(pool: &PgPool, uri: &str) -> (StatusCode, Value) {
             let app = actix_test::init_service(
                 App::new()
                     .wrap(TracingLogger::default())
                     .app_data(web::Data::new(pool.clone()))
-                    .route("/v1/changes", web::get().to(get_changes)),
+                    .route("/v1/changes", web::get().to(get_changes))
+                    .route("/v1/index-height", web::get().to(get_index_height)),
             )
             .await;
-            let req = actix_test::TestRequest::get()
-                .uri(&format!("/v1/changes{query}"))
-                .to_request();
+            let req = actix_test::TestRequest::get().uri(uri).to_request();
             let resp = actix_test::call_service(&app, req).await;
             let status = resp.status();
             let body = actix_test::read_body(resp).await;
@@ -285,9 +311,12 @@ mod tests {
                 return;
             };
 
-            let (status, all) = get(&pool, "").await;
+            let (status, all) = get(&pool, "/v1/changes").await;
             assert_eq!(status, StatusCode::OK);
             assert_eq!(all["current_through"], 160);
+            let (status, height) = get(&pool, "/v1/index-height").await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(height["ledger"], 172);
             // The ledger-165 update_owner is past current_through.
             assert_eq!(
                 types(&all),
@@ -332,32 +361,38 @@ mod tests {
             assert_eq!(r[6]["contract"]["owner"], "GOWNER");
 
             // Paging forward reproduces the full list.
-            let (_, page1) = get(&pool, "?limit=3").await;
+            let (_, page1) = get(&pool, "/v1/changes?limit=3").await;
             let cursor = page1["next"].as_str().unwrap().to_string();
-            let (_, page2) = get(&pool, &format!("?cursor={cursor}")).await;
+            let (_, page2) = get(&pool, &format!("/v1/changes?cursor={cursor}")).await;
             assert_eq!([types(&page1), types(&page2)].concat(), types(&all));
             // An empty poll hands the cursor back.
             let last = all["next"].as_str().unwrap();
-            let (_, empty) = get(&pool, &format!("?cursor={last}")).await;
+            let (_, empty) = get(&pool, &format!("/v1/changes?cursor={last}")).await;
             assert_eq!(types(&empty).len(), 0);
             assert_eq!(empty["next"], last);
 
-            let (_, desc) = get(&pool, "?order=desc&limit=2").await;
+            let (_, desc) = get(&pool, "/v1/changes?order=desc&limit=2").await;
             assert_eq!(types(&desc), ["rename", "update_owner"]);
             let cursor = desc["next"].as_str().unwrap().to_string();
-            let (_, desc2) = get(&pool, &format!("?order=desc&limit=2&cursor={cursor}")).await;
+            let (_, desc2) = get(
+                &pool,
+                &format!("/v1/changes?order=desc&limit=2&cursor={cursor}"),
+            )
+            .await;
             assert_eq!(types(&desc2), ["update_address", "register"]);
 
-            let (status, _) = get(&pool, "?limit=201").await;
+            let (status, _) = get(&pool, "/v1/changes?limit=201").await;
             assert_eq!(status, StatusCode::BAD_REQUEST);
-            let (status, _) = get(&pool, "?cursor=nope").await;
+            let (status, _) = get(&pool, "/v1/changes?cursor=nope").await;
             assert_eq!(status, StatusCode::BAD_REQUEST);
 
             sqlx::query("TRUNCATE v1.index_height")
                 .execute(&pool)
                 .await
                 .unwrap();
-            let (status, _) = get(&pool, "").await;
+            let (status, _) = get(&pool, "/v1/changes").await;
+            assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+            let (status, _) = get(&pool, "/v1/index-height").await;
             assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
         }
     }

@@ -101,6 +101,10 @@ id, or the cursor you sent), so poll with it. If `current_through` drops
 below your cursor's ledger, the pipeline was replayed (e.g.
 `refresh.sh`); resync from the start.
 
+`GET /v1/index-height` returns that raw height (`ledger`, `closed_at`)
+without the margin, e.g. for showing how far the index is behind the
+network.
+
 The views behind it live in `goldsky/v1/post_init.sql`. To test against a
 local Postgres (the test drops and recreates the `v1`/`archive` schemas):
 

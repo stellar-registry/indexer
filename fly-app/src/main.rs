@@ -6,7 +6,7 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use tracing_actix_web::{DefaultRootSpanBuilder, RequestId, TracingLogger};
 
-use crate::changes::get_changes;
+use crate::changes::{get_changes, get_index_height};
 use crate::error::{internal_server_error_response, log_db_error, ErrorResponse};
 use crate::tracing::init_tracing;
 use crate::verification::{
@@ -755,6 +755,7 @@ async fn index_v1() -> HttpResponse {
             { "method": "GET", "path": "/v1/contracts/{channel}/{contract_name}", "description": "Get details for a deployed contract for a specific channel, including the wasm versions history" },
             { "method": "GET", "path": "/v1/registries", "description": "List all known sub-registries announced by the root registry." },
             { "method": "GET", "path": "/v1/changes", "description": "Feed of registry events (publish, deploy, register, rename, update_address, update_owner) with the current state of each affected Wasm or contract. Params: order=asc|desc, limit=1-200, cursor=<event id>" },
+            { "method": "GET", "path": "/v1/index-height", "description": "Latest ledger the indexer has processed, and its close time" },
         ]
     }))
 }
@@ -848,6 +849,7 @@ async fn main() -> std::io::Result<()> {
                     )
                     .route("/registries", web::get().to(get_registries))
                     .route("/changes", web::get().to(get_changes))
+                    .route("/index-height", web::get().to(get_index_height))
                     .route("/contracts", web::get().to(get_contracts_root))
                     .route(
                         "/contract_deploy_details/{channel}/{contract_name}",
