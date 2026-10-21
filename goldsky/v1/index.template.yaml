@@ -24,7 +24,14 @@ transforms:
                     'rename',
                     'update_address',
                     'update_owner',
-                    'sub_reg'
+                    'sub_reg',
+                    'register_account',
+                    'update_acct_owner',
+                    'update_acct_addr',
+                    'rename_account',
+                    'sec_flag_acct',
+                    'preauth_acct',
+                    'revoke_preauth_acct'
                   )
         type: sql
     # Single-row index height for /v1/changes. Taken from the same event
@@ -280,6 +287,162 @@ transforms:
             FROM transform_4_events_with_name
             WHERE event_name = 'update_owner'
         type: sql
+    # Account-namespace events. Data maps have at most 3 fields; `owner` on
+    # register_account is NULL for events from registry versions before 0.8.0.
+    transform_5_register_account:
+        primary_key: id
+        sql: |-
+            SELECT
+                id, transaction_hash, ledger_sequence, created_at, emitter_contract_id,
+                CASE
+                    WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'account_name' THEN JSON_VALUE(data, '$.map[0].val.string')
+                    WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'account_name' THEN JSON_VALUE(data, '$.map[1].val.string')
+                    WHEN JSON_VALUE(data, '$.map[2].key.symbol') = 'account_name' THEN JSON_VALUE(data, '$.map[2].val.string')
+                END AS account_name,
+                CASE
+                    WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'account_id' THEN JSON_VALUE(data, '$.map[0].val.address')
+                    WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'account_id' THEN JSON_VALUE(data, '$.map[1].val.address')
+                    WHEN JSON_VALUE(data, '$.map[2].key.symbol') = 'account_id' THEN JSON_VALUE(data, '$.map[2].val.address')
+                END AS account_id,
+                CASE
+                    WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'owner' THEN JSON_VALUE(data, '$.map[0].val.address')
+                    WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'owner' THEN JSON_VALUE(data, '$.map[1].val.address')
+                    WHEN JSON_VALUE(data, '$.map[2].key.symbol') = 'owner' THEN JSON_VALUE(data, '$.map[2].val.address')
+                END AS owner
+            FROM transform_4_events_with_name
+            WHERE event_name = 'register_account'
+        type: sql
+    transform_5_update_acct_owner:
+        primary_key: id
+        sql: |-
+            SELECT
+                id, transaction_hash, ledger_sequence, created_at, emitter_contract_id,
+                CASE
+                    WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'account_name' THEN JSON_VALUE(data, '$.map[0].val.string')
+                    WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'account_name' THEN JSON_VALUE(data, '$.map[1].val.string')
+                    WHEN JSON_VALUE(data, '$.map[2].key.symbol') = 'account_name' THEN JSON_VALUE(data, '$.map[2].val.string')
+                END AS account_name,
+                CASE
+                    WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'new_owner' THEN JSON_VALUE(data, '$.map[0].val.address')
+                    WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'new_owner' THEN JSON_VALUE(data, '$.map[1].val.address')
+                    WHEN JSON_VALUE(data, '$.map[2].key.symbol') = 'new_owner' THEN JSON_VALUE(data, '$.map[2].val.address')
+                END AS new_owner,
+                CASE
+                    WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'operator' THEN JSON_VALUE(data, '$.map[0].val.address')
+                    WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'operator' THEN JSON_VALUE(data, '$.map[1].val.address')
+                    WHEN JSON_VALUE(data, '$.map[2].key.symbol') = 'operator' THEN JSON_VALUE(data, '$.map[2].val.address')
+                END AS operator
+            FROM transform_4_events_with_name
+            WHERE event_name = 'update_acct_owner'
+        type: sql
+    transform_5_update_acct_addr:
+        primary_key: id
+        sql: |-
+            SELECT
+                id, transaction_hash, ledger_sequence, created_at, emitter_contract_id,
+                CASE
+                    WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'account_name' THEN JSON_VALUE(data, '$.map[0].val.string')
+                    WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'account_name' THEN JSON_VALUE(data, '$.map[1].val.string')
+                    WHEN JSON_VALUE(data, '$.map[2].key.symbol') = 'account_name' THEN JSON_VALUE(data, '$.map[2].val.string')
+                END AS account_name,
+                CASE
+                    WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'new_address' THEN JSON_VALUE(data, '$.map[0].val.address')
+                    WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'new_address' THEN JSON_VALUE(data, '$.map[1].val.address')
+                    WHEN JSON_VALUE(data, '$.map[2].key.symbol') = 'new_address' THEN JSON_VALUE(data, '$.map[2].val.address')
+                END AS new_address,
+                CASE
+                    WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'operator' THEN JSON_VALUE(data, '$.map[0].val.address')
+                    WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'operator' THEN JSON_VALUE(data, '$.map[1].val.address')
+                    WHEN JSON_VALUE(data, '$.map[2].key.symbol') = 'operator' THEN JSON_VALUE(data, '$.map[2].val.address')
+                END AS operator
+            FROM transform_4_events_with_name
+            WHERE event_name = 'update_acct_addr'
+        type: sql
+    transform_5_rename_account:
+        primary_key: id
+        sql: |-
+            SELECT
+                id, transaction_hash, ledger_sequence, created_at, emitter_contract_id,
+                CASE
+                    WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'old_name' THEN JSON_VALUE(data, '$.map[0].val.string')
+                    WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'old_name' THEN JSON_VALUE(data, '$.map[1].val.string')
+                    WHEN JSON_VALUE(data, '$.map[2].key.symbol') = 'old_name' THEN JSON_VALUE(data, '$.map[2].val.string')
+                END AS old_name,
+                CASE
+                    WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'new_name' THEN JSON_VALUE(data, '$.map[0].val.string')
+                    WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'new_name' THEN JSON_VALUE(data, '$.map[1].val.string')
+                    WHEN JSON_VALUE(data, '$.map[2].key.symbol') = 'new_name' THEN JSON_VALUE(data, '$.map[2].val.string')
+                END AS new_name,
+                CASE
+                    WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'operator' THEN JSON_VALUE(data, '$.map[0].val.address')
+                    WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'operator' THEN JSON_VALUE(data, '$.map[1].val.address')
+                    WHEN JSON_VALUE(data, '$.map[2].key.symbol') = 'operator' THEN JSON_VALUE(data, '$.map[2].val.address')
+                END AS operator
+            FROM transform_4_events_with_name
+            WHERE event_name = 'rename_account'
+        type: sql
+    transform_5_sec_flag_acct:
+        primary_key: id
+        sql: |-
+            SELECT
+                id, transaction_hash, ledger_sequence, created_at, emitter_contract_id,
+                CASE
+                    WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'account_name' THEN JSON_VALUE(data, '$.map[0].val.string')
+                    WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'account_name' THEN JSON_VALUE(data, '$.map[1].val.string')
+                    WHEN JSON_VALUE(data, '$.map[2].key.symbol') = 'account_name' THEN JSON_VALUE(data, '$.map[2].val.string')
+                END AS account_name,
+                CASE
+                    WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'flagged' THEN CAST(JSON_VALUE(data, '$.map[0].val.bool') AS BOOLEAN)
+                    WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'flagged' THEN CAST(JSON_VALUE(data, '$.map[1].val.bool') AS BOOLEAN)
+                    WHEN JSON_VALUE(data, '$.map[2].key.symbol') = 'flagged' THEN CAST(JSON_VALUE(data, '$.map[2].val.bool') AS BOOLEAN)
+                END AS flagged,
+                CASE
+                    WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'operator' THEN JSON_VALUE(data, '$.map[0].val.address')
+                    WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'operator' THEN JSON_VALUE(data, '$.map[1].val.address')
+                    WHEN JSON_VALUE(data, '$.map[2].key.symbol') = 'operator' THEN JSON_VALUE(data, '$.map[2].val.address')
+                END AS operator
+            FROM transform_4_events_with_name
+            WHERE event_name = 'sec_flag_acct'
+        type: sql
+    transform_5_preauth_acct:
+        primary_key: id
+        sql: |-
+            SELECT
+                id, transaction_hash, ledger_sequence, created_at, emitter_contract_id,
+                CASE
+                    WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'account_name' THEN JSON_VALUE(data, '$.map[0].val.string')
+                    WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'account_name' THEN JSON_VALUE(data, '$.map[1].val.string')
+                    WHEN JSON_VALUE(data, '$.map[2].key.symbol') = 'account_name' THEN JSON_VALUE(data, '$.map[2].val.string')
+                END AS account_name,
+                CASE
+                    WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'account_id' THEN JSON_VALUE(data, '$.map[0].val.address')
+                    WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'account_id' THEN JSON_VALUE(data, '$.map[1].val.address')
+                    WHEN JSON_VALUE(data, '$.map[2].key.symbol') = 'account_id' THEN JSON_VALUE(data, '$.map[2].val.address')
+                END AS account_id,
+                CASE
+                    WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'owner' THEN JSON_VALUE(data, '$.map[0].val.address')
+                    WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'owner' THEN JSON_VALUE(data, '$.map[1].val.address')
+                    WHEN JSON_VALUE(data, '$.map[2].key.symbol') = 'owner' THEN JSON_VALUE(data, '$.map[2].val.address')
+                END AS owner
+            FROM transform_4_events_with_name
+            WHERE event_name = 'preauth_acct'
+        type: sql
+    transform_5_revoke_preauth_acct:
+        primary_key: id
+        sql: |-
+            SELECT
+                id, transaction_hash, ledger_sequence, created_at, emitter_contract_id,
+                CASE
+                    WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'account_name' THEN JSON_VALUE(data, '$.map[0].val.string')
+                    WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'account_name' THEN JSON_VALUE(data, '$.map[1].val.string')
+                END AS account_name,
+                CASE
+                    WHEN JSON_VALUE(data, '$.map[0].key.symbol') = 'account_id' THEN JSON_VALUE(data, '$.map[0].val.address')
+                    WHEN JSON_VALUE(data, '$.map[1].key.symbol') = 'account_id' THEN JSON_VALUE(data, '$.map[1].val.address')
+                END AS account_id
+            FROM transform_4_events_with_name
+            WHERE event_name = 'revoke_preauth_acct'
+        type: sql
     transform_6_publish_events_wasm_hash:
         primary_key: id
         sql: |-
@@ -350,6 +513,48 @@ sinks:
         schema: v1
         secret_name: ${PG_SECRET_NAME}
         table: update_owner
+        type: postgres
+    register_account_events_pg:
+        from: transform_5_register_account
+        schema: v1
+        secret_name: ${PG_SECRET_NAME}
+        table: registered_accounts
+        type: postgres
+    update_acct_owner_events_pg:
+        from: transform_5_update_acct_owner
+        schema: v1
+        secret_name: ${PG_SECRET_NAME}
+        table: update_acct_owner
+        type: postgres
+    update_acct_addr_events_pg:
+        from: transform_5_update_acct_addr
+        schema: v1
+        secret_name: ${PG_SECRET_NAME}
+        table: update_acct_addr
+        type: postgres
+    rename_account_events_pg:
+        from: transform_5_rename_account
+        schema: v1
+        secret_name: ${PG_SECRET_NAME}
+        table: rename_account
+        type: postgres
+    sec_flag_acct_events_pg:
+        from: transform_5_sec_flag_acct
+        schema: v1
+        secret_name: ${PG_SECRET_NAME}
+        table: sec_flag_acct
+        type: postgres
+    preauth_acct_events_pg:
+        from: transform_5_preauth_acct
+        schema: v1
+        secret_name: ${PG_SECRET_NAME}
+        table: preauth_acct
+        type: postgres
+    revoke_preauth_acct_events_pg:
+        from: transform_5_revoke_preauth_acct
+        schema: v1
+        secret_name: ${PG_SECRET_NAME}
+        table: revoke_preauth_acct
         type: postgres
     extract_wasm_spec_webhook:
         type: webhook

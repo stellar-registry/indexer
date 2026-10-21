@@ -6,6 +6,10 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use tracing_actix_web::{DefaultRootSpanBuilder, RequestId, TracingLogger};
 
+use crate::accounts::{
+    get_accounts_by_address, get_accounts_by_addresses, get_accounts_root, get_single_account,
+    get_single_account_root,
+};
 use crate::api_keys::{api_key_middleware, load_api_key_config};
 use crate::changes::{get_changes, get_index_height};
 use crate::error::{internal_server_error_response, log_db_error, ErrorResponse};
@@ -15,10 +19,13 @@ use crate::verification::{
 };
 use crate::wasms::{fetch_wasm_meta, fetch_wasm_spec, wasm_details_webhook, WasmMeta};
 use crate::webhooks::{load_webhook_config, webhook_auth_middleware};
+mod accounts;
 mod api_keys;
 mod changes;
 mod error;
 mod rate_limit;
+#[cfg(test)]
+mod test_db;
 mod tracing;
 mod util;
 mod verification;
@@ -350,20 +357,21 @@ async fn fetch_wasm_detail(
 
             match versions {
                 Ok(v) => {
-                    let (wasm_meta, verified) =
-                        if let Some(wasm_hash) = detail_row.wasm_hash.as_deref() {
-                            let meta = fetch_wasm_meta(pool, wasm_hash).await;
-                            let verified = fetch_wasm_verification(pool, wasm_hash).await;
-                            (meta, verified)
-                        } else {
-                            ::tracing::warn!(
-                                wasm_name,
-                                channel,
-                                version = ?version,
-                                "missing wasm_hash; returning wasm detail without metadata or verification"
-                            );
-                            (None, None)
-                        };
+                    let (wasm_meta, verified) = if let Some(wasm_hash) =
+                        detail_row.wasm_hash.as_deref()
+                    {
+                        let meta = fetch_wasm_meta(pool, wasm_hash).await;
+                        let verified = fetch_wasm_verification(pool, wasm_hash).await;
+                        (meta, verified)
+                    } else {
+                        ::tracing::warn!(
+                            wasm_name,
+                            channel,
+                            version = ?version,
+                            "missing wasm_hash; returning wasm detail without metadata or verification"
+                        );
+                        (None, None)
+                    };
                     HttpResponse::Ok().json(WasmDetail {
                         row: detail_row,
                         versions: v,
@@ -755,6 +763,11 @@ async fn index_v1() -> HttpResponse {
             { "method": "GET", "path": "/v1/contracts", "description": "List all deployed contracts (main channel)" },
             { "method": "GET", "path": "/v1/contracts/{contract_name}", "description": "Get details for a deployed contract (main channel), including the wasm versions history" },
             { "method": "GET", "path": "/v1/contracts/{channel}/{contract_name}", "description": "Get details for a deployed contract for a specific channel, including the wasm versions history" },
+            { "method": "GET", "path": "/v1/accounts", "description": "List named accounts (G-addresses and smart accounts) across registries, with current address, owner and flag. Params: query, limit=1-200, cursor, sort_by, descending" },
+            { "method": "GET", "path": "/v1/accounts/{account_name}", "description": "Get a named account (root registry)" },
+            { "method": "GET", "path": "/v1/accounts/{channel}/{account_name}", "description": "Get a named account for a specific channel" },
+            { "method": "GET", "path": "/v1/accounts/by-address/{address}", "description": "List the names currently pointing at an address" },
+            { "method": "GET", "path": "/v1/accounts/by-address?addresses=a,b,c", "description": "Names for up to 100 addresses at once, keyed by address" },
             { "method": "GET", "path": "/v1/registries", "description": "List all known sub-registries announced by the root registry." },
             { "method": "GET", "path": "/v1/changes", "description": "Feed of registry events (publish, deploy, register, rename, update_address, update_owner) with the current state of each affected Wasm or contract. Params: order=asc|desc, limit=1-200, cursor=<event id>" },
             { "method": "GET", "path": "/v1/index-height", "description": "Latest ledger the indexer has processed, and its close time" },
@@ -869,6 +882,25 @@ async fn main() -> std::io::Result<()> {
                     .route(
                         "/contracts/{channel}/{contract_name}",
                         web::get().to(get_single_contract),
+                    )
+                    .route("/accounts", web::get().to(get_accounts_root))
+                    // Before the {account_name} routes, which would match
+                    // "by-address" as a name or channel.
+                    .route(
+                        "/accounts/by-address",
+                        web::get().to(get_accounts_by_addresses),
+                    )
+                    .route(
+                        "/accounts/by-address/{address}",
+                        web::get().to(get_accounts_by_address),
+                    )
+                    .route(
+                        "/accounts/{account_name}",
+                        web::get().to(get_single_account_root),
+                    )
+                    .route(
+                        "/accounts/{channel}/{account_name}",
+                        web::get().to(get_single_account),
                     ),
             )
             .route("/health", web::get().to(health))
