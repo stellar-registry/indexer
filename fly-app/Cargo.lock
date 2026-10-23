@@ -2569,9 +2569,9 @@ dependencies = [
 
 [[package]]
 name = "soroban-meta"
-version = "28.0.0"
+version = "29.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fcefac93a273f4c15e19ead45298ebb499d399e6ca3e1b6ac3bfdae6e545252"
+checksum = "3c89593762ccd6cec28edd66d6c3c3d7e81c201360d50c6ca93b9b8a3870cdb2"
 dependencies = [
  "stellar-xdr",
  "thiserror 1.0.69",
@@ -2580,9 +2580,9 @@ dependencies = [
 
 [[package]]
 name = "soroban-spec"
-version = "28.0.0"
+version = "29.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f48c8e183fc140ccd89e1fe1663cc605fb18641967c0bb591f64887599fde59"
+checksum = "092d55c5563d973c681fb8016fb9bc47a9e8c3d3aa4a5dafcc1c3d4ebc415829"
 dependencies = [
  "base64",
  "sha2",
