@@ -122,9 +122,9 @@ never changed owner, since those events don't carry it.
 `v1.pending_account_preauths` lists preauthorizations not yet revoked or
 consumed. Expiry isn't evented, so old rows may have lapsed.
 
-The account events landed after the v1 pipeline started, so their sinks
-need history reprocessed: deploy this with `redeploy.sh`, not
-`turbo apply`.
+The account events add new sinks, so `turbo apply` indexes them from the
+pipeline's current checkpoint (see Deployment). Mainnet has no account
+events yet; on testnet, redeploy only if earlier ones need backfilling.
 
 ### Change feed (`/v1/changes`)
 `GET /v1/changes?order=asc|desc&limit=1-200&cursor=<event id>` lists every
