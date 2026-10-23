@@ -2,7 +2,7 @@ use actix_web::{web, HttpResponse};
 use serde::{Deserialize, Serialize};
 use sqlx;
 use sqlx::{types::Json, PgPool};
-use stellar_xdr::curr::{ScMetaEntry, ScMetaV0, ScSpecEntry, ScSpecTypeDef};
+use stellar_xdr::{ScMetaEntry, ScMetaV0, ScSpecEntry, ScSpecTypeDef};
 
 use crate::log_db_error;
 
@@ -320,7 +320,7 @@ pub async fn wasm_details_webhook(
 #[cfg(test)]
 mod tests {
     use super::{meta_entries_to_json, WasmMeta};
-    use stellar_xdr::curr::{ScMetaEntry, ScMetaV0};
+    use stellar_xdr::{ScMetaEntry, ScMetaV0};
 
     fn entry(key: &str, val: &str) -> ScMetaEntry {
         ScMetaEntry::ScMetaV0(ScMetaV0 {
