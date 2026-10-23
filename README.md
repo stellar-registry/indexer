@@ -103,6 +103,29 @@ one, set the list without it. To rotate a key, add a second entry for the same
 name, hand out the new key, then remove the old entry. Setting a secret
 restarts the app.
 
+### Accounts (`/v1/accounts`)
+Named accounts (G-addresses and smart accounts) are served
+from the `v1.accounts` view, which folds `register_account`,
+`rename_account`, `update_acct_addr`, `update_acct_owner` and `sec_flag_acct`
+events into each registration's current state. `registration_id` (the
+`register_account` event id) stays the same through renames and address
+changes. `owner` is null for a registration from before v0.8.0 that has
+never changed owner, since those events don't carry it.
+
+- `GET /v1/accounts`, `/v1/accounts/{account_name}`,
+  `/v1/accounts/{channel}/{account_name}`: list and detail, like contracts.
+- `GET /v1/accounts/by-address/{address}`: names currently pointing at an
+  address.
+- `GET /v1/accounts/by-address?addresses=G...,C...`: the same for up to 100
+  addresses, keyed by address.
+
+`v1.pending_account_preauths` lists preauthorizations not yet revoked or
+consumed. Expiry isn't evented, so old rows may have lapsed.
+
+The account events add new sinks, so `turbo apply` indexes them from the
+pipeline's current checkpoint (see Deployment). Mainnet has no account
+events yet; on testnet, redeploy only if earlier ones need backfilling.
+
 ### Change feed (`/v1/changes`)
 `GET /v1/changes?order=asc|desc&limit=1-200&cursor=<event id>` lists every
 registry event (`publish`, `deploy`, `register`, `rename`,
