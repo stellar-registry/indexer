@@ -49,7 +49,15 @@ dropping tables, or resetting its checkpoint.
 Use `redeploy.sh` (or the manual "Redeploy Goldsky Pipeline"
 GitHub Action) _only_ when the change needs history reprocessed: a
 new/changed sink column, a lowered `start_at`, or recovering from the
-dynamic-table race described in that script's comments.
+dynamic-table race described in that script's comments. It drops the
+pipeline's schema (e.g. `v1`) and replays from `start_at`, so the API serves partial data
+until it catches up.
+
+A new sink (e.g. for a newly indexed event) doesn't need a redeploy by
+itself: `turbo apply` starts filling it from the pipeline's current
+checkpoint. Redeploy only if events emitted before the apply must be
+backfilled. If `post_init.sql` builds views over the new table, run it
+once the table exists.
 
 2. Update the database with psql
 
