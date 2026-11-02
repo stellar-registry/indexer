@@ -421,3 +421,227 @@ SELECT id, ledger_sequence, created_at, transaction_hash, emitter_contract_id,
          CASE type WHEN 'update_address' THEN 'new_address' ELSE 'new_owner' END, value
        )
 FROM contract_name_events;
+
+-- ── Accounts ────────────────────────────────────────────────────────
+--
+-- Named accounts (G-addresses and smart accounts) live in their own
+-- namespace, separate from contracts, with the same name-keyed lifecycle:
+-- `rename_account` moves an entry, and `update_acct_addr` /
+-- `update_acct_owner` / `sec_flag_acct` refer to it by its name at that
+-- point. As for contracts, the `register_account` event id is the stable
+-- identity.
+
+DROP VIEW IF EXISTS pending_account_preauths;
+DROP VIEW IF EXISTS account_namings;
+DROP VIEW IF EXISTS accounts;
+DROP VIEW IF EXISTS account_name_events;
+DROP VIEW IF EXISTS account_name_history;
+
+CREATE INDEX IF NOT EXISTS account_name_trgm_idx_registered_accounts ON registered_accounts USING GIN (account_name gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS registered_accounts_account_id_idx ON registered_accounts (account_id);
+CREATE INDEX IF NOT EXISTS update_acct_addr_new_address_idx ON update_acct_addr (new_address);
+
+-- Each account registration's name over time, as contract_name_history.
+CREATE VIEW account_name_history AS
+WITH RECURSIVE chain AS (
+  SELECT
+    r.id AS registration_id,
+    r.emitter_contract_id,
+    r.account_name AS name,
+    r.ledger_sequence,
+    r.id AS since_id,
+    r.created_at,
+    0 AS step
+  FROM registered_accounts r
+  UNION ALL
+  SELECT
+    c.registration_id,
+    c.emitter_contract_id,
+    n.new_name,
+    n.ledger_sequence,
+    n.id,
+    n.created_at,
+    c.step + 1
+  FROM chain c
+  CROSS JOIN LATERAL (
+    SELECT x.new_name, x.ledger_sequence, x.id, x.created_at
+    FROM rename_account x
+    WHERE x.emitter_contract_id = c.emitter_contract_id
+      AND x.old_name = c.name
+      AND (x.ledger_sequence, x.id) > (c.ledger_sequence, c.since_id)
+    ORDER BY x.ledger_sequence, x.id
+    LIMIT 1
+  ) n
+)
+SELECT
+  registration_id,
+  emitter_contract_id,
+  name,
+  ledger_sequence AS since_ledger,
+  since_id,
+  created_at AS since_created_at,
+  LEAD(ledger_sequence) OVER w AS until_ledger,
+  LEAD(since_id) OVER w AS until_id
+FROM chain
+WINDOW w AS (PARTITION BY registration_id ORDER BY step);
+
+-- update_acct_addr / update_acct_owner / sec_flag_acct events, attributed
+-- to the registration that held account_name when the event happened.
+CREATE VIEW account_name_events AS
+SELECT
+  e.id,
+  e.ledger_sequence,
+  e.created_at,
+  e.transaction_hash,
+  e.emitter_contract_id,
+  e.type,
+  e.account_name,
+  e.value,
+  e.operator,
+  h.registration_id
+FROM (
+  SELECT id, ledger_sequence, created_at, transaction_hash, emitter_contract_id,
+         'update_address'::text AS type, account_name, new_address AS value, operator
+  FROM update_acct_addr
+  UNION ALL
+  SELECT id, ledger_sequence, created_at, transaction_hash, emitter_contract_id,
+         'update_owner'::text, account_name, new_owner, operator
+  FROM update_acct_owner
+  UNION ALL
+  SELECT id, ledger_sequence, created_at, transaction_hash, emitter_contract_id,
+         'flag'::text, account_name, flagged::text, operator
+  FROM sec_flag_acct
+) e
+LEFT JOIN account_name_history h
+  ON h.emitter_contract_id = e.emitter_contract_id
+ AND h.name = e.account_name
+ AND (h.since_ledger, h.since_id) < (e.ledger_sequence, e.id)
+ AND (h.until_id IS NULL OR (e.ledger_sequence, e.id) < (h.until_ledger, h.until_id));
+
+-- Current state of every account registration. owner is NULL only for
+-- registrations from registry versions before 0.8.0 that were never
+-- given a new owner (their register_account event has no owner).
+CREATE VIEW accounts AS
+SELECT
+  r.id AS registration_id,
+  r.id,
+  r.transaction_hash,
+  r.ledger_sequence,
+  r.emitter_contract_id,
+  ch.registry_channel AS channel,
+  cur.name AS account_name,
+  COALESCE(addr.value, r.account_id) AS address,
+  COALESCE(own.value, r.owner) AS owner,
+  COALESCE(flag.value::boolean, false) AS flagged,
+  r.created_at,
+  GREATEST(r.created_at, renamed.at, changed.at) AS updated_at
+FROM registered_accounts r
+JOIN registries ch ON ch.contract_id = r.emitter_contract_id
+JOIN account_name_history cur
+  ON cur.registration_id = r.id AND cur.until_id IS NULL
+LEFT JOIN LATERAL (
+  SELECT value FROM account_name_events
+  WHERE registration_id = r.id AND type = 'update_address'
+  ORDER BY ledger_sequence DESC, id DESC
+  LIMIT 1
+) addr ON true
+LEFT JOIN LATERAL (
+  SELECT value FROM account_name_events
+  WHERE registration_id = r.id AND type = 'update_owner'
+  ORDER BY ledger_sequence DESC, id DESC
+  LIMIT 1
+) own ON true
+LEFT JOIN LATERAL (
+  SELECT value FROM account_name_events
+  WHERE registration_id = r.id AND type = 'flag'
+  ORDER BY ledger_sequence DESC, id DESC
+  LIMIT 1
+) flag ON true
+LEFT JOIN LATERAL (
+  SELECT max(since_created_at) AS at FROM account_name_history
+  WHERE registration_id = r.id AND since_id <> r.id
+) renamed ON true
+LEFT JOIN LATERAL (
+  SELECT max(created_at) AS at FROM account_name_events
+  WHERE registration_id = r.id
+) changed ON true;
+
+-- Every event that put an address under a name (register, address
+-- update, rename), with the registration's address and owner at that
+-- point. A matching preauthorization is consumed by any of these.
+CREATE VIEW account_namings AS
+SELECT
+  n.registration_id,
+  n.emitter_contract_id,
+  n.name,
+  n.ledger_sequence,
+  n.event_id,
+  COALESCE(addr.value, r.account_id) AS address,
+  COALESCE(own.value, r.owner) AS owner
+FROM (
+  SELECT id AS registration_id, emitter_contract_id, account_name AS name,
+         ledger_sequence, id AS event_id
+  FROM registered_accounts
+  UNION ALL
+  SELECT registration_id, emitter_contract_id, account_name, ledger_sequence, id
+  FROM account_name_events
+  WHERE type = 'update_address'
+  UNION ALL
+  SELECT registration_id, emitter_contract_id, name, since_ledger, since_id
+  FROM account_name_history
+  WHERE since_id <> registration_id
+) n
+JOIN registered_accounts r ON r.id = n.registration_id
+LEFT JOIN LATERAL (
+  SELECT value FROM account_name_events
+  WHERE registration_id = n.registration_id AND type = 'update_address'
+    AND (ledger_sequence, id) <= (n.ledger_sequence, n.event_id)
+  ORDER BY ledger_sequence DESC, id DESC
+  LIMIT 1
+) addr ON true
+LEFT JOIN LATERAL (
+  SELECT value FROM account_name_events
+  WHERE registration_id = n.registration_id AND type = 'update_owner'
+    AND (ledger_sequence, id) < (n.ledger_sequence, n.event_id)
+  ORDER BY ledger_sequence DESC, id DESC
+  LIMIT 1
+) own ON true;
+
+-- Preauthorizations still waiting to be used: the latest preauth_acct per
+-- (registry, name, address), unless a revoke or a matching naming (same
+-- name, address and owner) came after it. Expiry isn't evented: an entry
+-- lapses after the network's max temporary-entry TTL counted from
+-- ledger_sequence (~3.1M ledgers on testnet and mainnet), so consumers
+-- should treat old rows as possibly expired.
+CREATE VIEW pending_account_preauths AS
+SELECT
+  p.id,
+  p.transaction_hash,
+  p.ledger_sequence,
+  p.created_at,
+  p.emitter_contract_id,
+  ch.registry_channel AS channel,
+  p.account_name,
+  p.account_id AS address,
+  p.owner
+FROM (
+  SELECT DISTINCT ON (emitter_contract_id, account_name, account_id) *
+  FROM preauth_acct
+  ORDER BY emitter_contract_id, account_name, account_id, ledger_sequence DESC, id DESC
+) p
+JOIN registries ch ON ch.contract_id = p.emitter_contract_id
+WHERE NOT EXISTS (
+  SELECT 1 FROM revoke_preauth_acct x
+  WHERE x.emitter_contract_id = p.emitter_contract_id
+    AND x.account_name = p.account_name
+    AND x.account_id = p.account_id
+    AND (x.ledger_sequence, x.id) > (p.ledger_sequence, p.id)
+)
+AND NOT EXISTS (
+  SELECT 1 FROM account_namings n
+  WHERE n.emitter_contract_id = p.emitter_contract_id
+    AND n.name = p.account_name
+    AND n.address = p.account_id
+    AND n.owner = p.owner
+    AND (n.ledger_sequence, n.event_id) > (p.ledger_sequence, p.id)
+);

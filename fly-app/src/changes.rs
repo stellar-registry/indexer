@@ -227,7 +227,6 @@ mod tests {
         use super::super::*;
         use actix_web::{http::StatusCode, test as actix_test, App};
         use serde_json::Value;
-        use sqlx::postgres::PgPoolOptions;
         use tracing_actix_web::TracingLogger;
 
         const SEED: &str = "
@@ -252,31 +251,6 @@ mod tests {
               ('140-d', 139, now(), 'tx139', 'CC', 'hash1');
             INSERT INTO v1.index_height VALUES ('v1', 172, now());
         ";
-
-        async fn pool() -> Option<PgPool> {
-            let url = std::env::var("TEST_DATABASE_URL").ok()?;
-            let pool = PgPoolOptions::new()
-                .max_connections(1)
-                .connect(&url)
-                .await
-                .unwrap();
-            sqlx::raw_sql(
-                "DROP SCHEMA IF EXISTS v1 CASCADE; DROP SCHEMA IF EXISTS archive CASCADE;",
-            )
-            .execute(&pool)
-            .await
-            .unwrap();
-            sqlx::raw_sql(include_str!("../tests/fixtures/goldsky_tables.sql"))
-                .execute(&pool)
-                .await
-                .unwrap();
-            sqlx::raw_sql(include_str!("../../goldsky/v1/post_init.sql"))
-                .execute(&pool)
-                .await
-                .unwrap();
-            sqlx::raw_sql(SEED).execute(&pool).await.unwrap();
-            Some(pool)
-        }
 
         async fn get(pool: &PgPool, uri: &str) -> (StatusCode, Value) {
             let app = actix_test::init_service(
@@ -306,7 +280,7 @@ mod tests {
         // One test so the shared schema isn't rebuilt under a concurrent test.
         #[actix_web::test]
         async fn change_feed() {
-            let Some(pool) = pool().await else {
+            let Some((pool, _guard)) = crate::test_db::pool(SEED).await else {
                 eprintln!("TEST_DATABASE_URL not set; skipping");
                 return;
             };
