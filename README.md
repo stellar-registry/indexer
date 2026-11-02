@@ -127,6 +127,11 @@ never changed owner, since those events don't carry it.
 - `GET /v1/accounts/by-address?addresses=G...,C...`: the same for up to 100
   addresses, keyed by address.
 
+Wasm, contract and `/v1/changes` responses also label `author` and
+`deployer` with `author_name` / `deployer_name` from `v1.account_display_names`:
+one name per address, skipping flagged accounts and preferring a root-registry
+name, with subregistry names prefixed by their channel (`unverified/alice`).
+
 `v1.pending_account_preauths` lists preauthorizations not yet revoked or
 consumed. Expiry isn't evented, so old rows may have lapsed.
 

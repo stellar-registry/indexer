@@ -433,6 +433,7 @@ FROM contract_name_events;
 
 DROP VIEW IF EXISTS pending_account_preauths;
 DROP VIEW IF EXISTS account_namings;
+DROP VIEW IF EXISTS account_display_names;
 DROP VIEW IF EXISTS accounts;
 DROP VIEW IF EXISTS account_name_events;
 DROP VIEW IF EXISTS account_name_history;
@@ -565,6 +566,19 @@ LEFT JOIN LATERAL (
   SELECT max(created_at) AS at FROM account_name_events
   WHERE registration_id = r.id
 ) changed ON true;
+
+-- One display name per address, for labelling authors, deployers and
+-- owners elsewhere in the API. Flagged accounts are skipped; a root-registry
+-- name wins over a subregistry's, then the oldest registration. Subregistry
+-- names carry their channel, as the CLI writes them (`unverified/alice`).
+CREATE VIEW account_display_names AS
+SELECT DISTINCT ON (address)
+  address,
+  CASE WHEN channel = 'root' THEN account_name
+       ELSE channel || '/' || account_name END AS display_name
+FROM accounts
+WHERE NOT flagged
+ORDER BY address, (channel <> 'root'), ledger_sequence, id;
 
 -- Every event that put an address under a name (register, address
 -- update, rename), with the registration's address and owner at that
