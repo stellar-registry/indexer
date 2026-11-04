@@ -153,28 +153,36 @@ pub async fn get_changes(
         Order::Asc => (">", "ASC"),
         Order::Desc => ("<", "DESC"),
     };
+    // Names are joined onto the page after LIMIT: joined inside it, the
+    // planner misjudges account_display_names and re-runs
+    // contract_registrations per row (seconds became minutes on mainnet).
     let statement = format!(
-        "SELECT c.id, c.type AS kind, c.ledger_sequence, c.created_at, c.transaction_hash, \
-                reg.registry_channel AS channel, c.event, \
-                CASE WHEN c.wasm_hash IS NOT NULL THEN jsonb_build_object( \
-                    'wasm_hash', c.wasm_hash, 'wasm_name', c.event->>'wasm_name', \
-                    'wasm_version', c.event->>'wasm_version', 'author', c.event->>'author', \
-                    'author_name', author_name.display_name, \
-                    'channel', reg.registry_channel) END AS wasm, \
-                CASE WHEN cr.registration_id IS NOT NULL THEN to_jsonb(cr) \
-                    || jsonb_build_object('deployer_name', deployer_name.display_name) \
-                END AS contract \
-         FROM v1.changes c \
-         LEFT JOIN v1.registries reg ON reg.contract_id = c.emitter_contract_id \
-         LEFT JOIN v1.contract_registrations cr ON cr.registration_id = c.registration_id \
+        "SELECT p.id, p.kind, p.ledger_sequence, p.created_at, p.transaction_hash, \
+                p.channel, p.event, \
+                p.wasm || jsonb_build_object('author_name', author_name.display_name) AS wasm, \
+                p.contract || jsonb_build_object('deployer_name', deployer_name.display_name) \
+                    AS contract \
+         FROM ( \
+           SELECT c.id, c.type AS kind, c.ledger_sequence, c.created_at, c.transaction_hash, \
+                  reg.registry_channel AS channel, c.event, \
+                  CASE WHEN c.wasm_hash IS NOT NULL THEN jsonb_build_object( \
+                      'wasm_hash', c.wasm_hash, 'wasm_name', c.event->>'wasm_name', \
+                      'wasm_version', c.event->>'wasm_version', 'author', c.event->>'author', \
+                      'channel', reg.registry_channel) END AS wasm, \
+                  CASE WHEN cr.registration_id IS NOT NULL THEN to_jsonb(cr) END AS contract \
+           FROM v1.changes c \
+           LEFT JOIN v1.registries reg ON reg.contract_id = c.emitter_contract_id \
+           LEFT JOIN v1.contract_registrations cr ON cr.registration_id = c.registration_id \
+           WHERE c.ledger_sequence <= $1 \
+             AND ($2::bigint IS NULL OR (c.ledger_sequence, c.id) {cmp} ($2, $3)) \
+           ORDER BY c.ledger_sequence {dir}, c.id {dir} \
+           LIMIT $4 \
+         ) p \
          LEFT JOIN v1.account_display_names author_name \
-           ON author_name.address = c.event->>'author' \
+           ON author_name.address = p.wasm->>'author' \
          LEFT JOIN v1.account_display_names deployer_name \
-           ON deployer_name.address = cr.deployer \
-         WHERE c.ledger_sequence <= $1 \
-           AND ($2::bigint IS NULL OR (c.ledger_sequence, c.id) {cmp} ($2, $3)) \
-         ORDER BY c.ledger_sequence {dir}, c.id {dir} \
-         LIMIT $4"
+           ON deployer_name.address = p.contract->>'deployer' \
+         ORDER BY p.ledger_sequence {dir}, p.id {dir}"
     );
 
     let (cursor_ledger, cursor_id) = cursor.unzip();
