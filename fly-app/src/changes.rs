@@ -159,11 +159,18 @@ pub async fn get_changes(
                 CASE WHEN c.wasm_hash IS NOT NULL THEN jsonb_build_object( \
                     'wasm_hash', c.wasm_hash, 'wasm_name', c.event->>'wasm_name', \
                     'wasm_version', c.event->>'wasm_version', 'author', c.event->>'author', \
+                    'author_name', author_name.display_name, \
                     'channel', reg.registry_channel) END AS wasm, \
-                CASE WHEN cr.registration_id IS NOT NULL THEN to_jsonb(cr) END AS contract \
+                CASE WHEN cr.registration_id IS NOT NULL THEN to_jsonb(cr) \
+                    || jsonb_build_object('deployer_name', deployer_name.display_name) \
+                END AS contract \
          FROM v1.changes c \
          LEFT JOIN v1.registries reg ON reg.contract_id = c.emitter_contract_id \
          LEFT JOIN v1.contract_registrations cr ON cr.registration_id = c.registration_id \
+         LEFT JOIN v1.account_display_names author_name \
+           ON author_name.address = c.event->>'author' \
+         LEFT JOIN v1.account_display_names deployer_name \
+           ON deployer_name.address = cr.deployer \
          WHERE c.ledger_sequence <= $1 \
            AND ($2::bigint IS NULL OR (c.ledger_sequence, c.id) {cmp} ($2, $3)) \
          ORDER BY c.ledger_sequence {dir}, c.id {dir} \

@@ -47,6 +47,8 @@ struct WasmResult {
     #[serde(skip)]
     id: String,
     author: Option<String>,
+    /// Registry account name of `author`, if it has one
+    author_name: Option<String>,
     channel: Option<String>,
     wasm_version: Option<String>,
     wasm_name: Option<String>,
@@ -57,6 +59,7 @@ struct WasmResult {
 #[derive(sqlx::FromRow, Serialize)]
 struct WasmVersionResult {
     author: Option<String>,
+    author_name: Option<String>,
     wasm_version: Option<String>,
     wasm_name: Option<String>,
     wasm_hash: Option<String>,
@@ -85,6 +88,7 @@ struct WasmDetailRow {
     created_at: chrono::NaiveDateTime,
     channel: Option<String>,
     author: Option<String>,
+    author_name: Option<String>,
     wasm_version: Option<String>,
     wasm_name: Option<String>,
     wasm_hash: Option<String>,
@@ -109,6 +113,8 @@ struct ContractResult {
     contract_id: Option<String>,
     contract_name: Option<String>,
     deployer: Option<String>,
+    /// Registry account name of `deployer`, if it has one
+    deployer_name: Option<String>,
     wasm_version: Option<String>,
     wasm_name: Option<String>,
     wasm_channel: Option<String>,
@@ -130,6 +136,7 @@ struct ContractDetail {
     contract_name: Option<String>,
     channel: Option<String>,
     deployer: Option<String>,
+    deployer_name: Option<String>,
     wasm_version: Option<String>,
     wasm_name: Option<String>,
     wasm_channel: Option<String>,
@@ -190,6 +197,7 @@ struct ContractDeployDetail {
     contract_name: Option<String>,
     channel: Option<String>,
     deployer: Option<String>,
+    deployer_name: Option<String>,
     #[serde(serialize_with = "serialize_raw")]
     operation_body: Option<String>,
 }
@@ -232,7 +240,8 @@ async fn get_wasms(
     };
 
     let mut statement = String::from(
-        "SELECT id, author, wasm_version, wasm_name, wasm_hash, channel, \
+        "SELECT id, author, an.display_name AS author_name, \
+                wasm_version, wasm_name, wasm_hash, channel, \
                 CASE \
                     WHEN $4::text IS NULL THEN 0 \
                     ELSE GREATEST( \
@@ -243,6 +252,7 @@ async fn get_wasms(
                     ) \
                 END AS rank \
          FROM v1.latest_published_wasms \
+         LEFT JOIN v1.account_display_names an ON an.address = author \
          WHERE (ledger_sequence, id) >= ($1, $2) \
             AND (
                 $4::text IS NULL \
@@ -317,8 +327,10 @@ async fn fetch_wasm_detail(
     let row = if let Some(ver) = version {
         sqlx::query_as::<_, WasmDetailRow>(
             "SELECT id, transaction_hash, ledger_sequence, created_at, \
-                    author, wasm_version, wasm_name, wasm_hash, channel \
+                    author, an.display_name AS author_name, \
+                    wasm_version, wasm_name, wasm_hash, channel \
              FROM v1.published_wasms_with_channel \
+             LEFT JOIN v1.account_display_names an ON an.address = author \
              WHERE wasm_name = $1 AND wasm_version = $2 \
                AND channel = $3",
         )
@@ -330,8 +342,10 @@ async fn fetch_wasm_detail(
     } else {
         sqlx::query_as::<_, WasmDetailRow>(
             "SELECT id, transaction_hash, ledger_sequence, created_at, \
-                    author, wasm_version, wasm_name, wasm_hash, channel \
+                    author, an.display_name AS author_name, \
+                    wasm_version, wasm_name, wasm_hash, channel \
              FROM v1.latest_published_wasms \
+             LEFT JOIN v1.account_display_names an ON an.address = author \
              WHERE wasm_name = $1 AND channel = $2",
         )
         .bind(wasm_name)
@@ -344,8 +358,10 @@ async fn fetch_wasm_detail(
         // TODO: can do only one select and filter the results
         Ok(Some(detail_row)) => {
             let versions = sqlx::query_as::<_, WasmVersionResult>(
-                "SELECT author, wasm_version, wasm_name, wasm_hash, channel \
+                "SELECT author, an.display_name AS author_name, \
+                        wasm_version, wasm_name, wasm_hash, channel \
                  FROM v1.published_wasms_with_channel \
+                 LEFT JOIN v1.account_display_names an ON an.address = author \
                  WHERE wasm_name = $1 \
                    AND channel = $2 \
                  ORDER BY ledger_sequence DESC, wasm_version DESC",
@@ -472,6 +488,7 @@ async fn get_contracts_root(
 
     let mut statement = String::from(
         "SELECT id, contract_id, channel, contract_name, sac, deployer, \
+                an.display_name AS deployer_name, \
                 wasm_version, wasm_name, wasm_channel, \
                 CASE \
                     WHEN $4::text IS NULL THEN 0 \
@@ -484,6 +501,7 @@ async fn get_contracts_root(
                     ) \
                 END AS rank \
          FROM v1.contracts_enriched \
+         LEFT JOIN v1.account_display_names an ON an.address = deployer \
          WHERE (ledger_sequence, id) >= ($1, $2) \
             AND (
                 $4::text IS NULL \
@@ -573,8 +591,10 @@ async fn fetch_single_contract(
     let row = sqlx::query_as::<_, ContractDetail>(
         "SELECT id, transaction_hash, ledger_sequence, created_at, \
                 contract_id, contract_name, channel, sac, \
-                deployer, wasm_version, wasm_name, wasm_channel \
+                deployer, an.display_name AS deployer_name, \
+                wasm_version, wasm_name, wasm_channel \
          FROM v1.contracts_enriched \
+         LEFT JOIN v1.account_display_names an ON an.address = deployer \
          WHERE contract_name = $1 AND channel = $2 \
          ORDER BY ledger_sequence DESC \
          LIMIT 1",
@@ -667,6 +687,7 @@ async fn fetch_single_contract_detail(
                 registered.contract_name,
                 registered.channel,
                 deployed.deployer,
+                an.display_name AS deployer_name,
                 raw_event.operation_body
             FROM v1.registered_contracts_with_channel registered
             LEFT JOIN (
@@ -674,6 +695,7 @@ async fn fetch_single_contract_detail(
                 FROM v1.deployed_contracts
                 ORDER BY contract_id, ledger_sequence DESC
             ) deployed ON deployed.contract_id = registered.contract_id
+            LEFT JOIN v1.account_display_names an ON an.address = deployed.deployer
             LEFT JOIN v1.raw_events_backup raw_event
               ON deployed.transaction_hash = raw_event.contract_id
             WHERE registered.contract_name = $1

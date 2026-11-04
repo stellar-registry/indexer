@@ -436,4 +436,112 @@ mod tests {
             );
         }
     }
+
+    // Wasm, contract and change-feed responses label authors and deployers
+    // with their account names.
+    mod display_names {
+        use super::super::*;
+        use crate::changes::get_changes;
+        use crate::{
+            get_contracts_root, get_single_contract_root, get_wasm_root_channel, get_wasms,
+        };
+        use actix_web::{test as actix_test, App};
+        use serde_json::Value;
+        use tracing_actix_web::TracingLogger;
+
+        // GALICE is named in root and unverified (root wins); GBOB only in
+        // unverified; GFLAG's only name is flagged, so it gets none.
+        const SEED: &str = "
+            INSERT INTO v1.registries VALUES
+              ('0-r', 'tx0', 1, now(), 'CROOT', 'root'),
+              ('1-r', 'tx1', 1, now(), 'CUNV', 'unverified');
+            INSERT INTO v1.registered_accounts VALUES
+              ('10-tx10-op-0-event-0', 'tx10', 10, now(), 'CUNV', 'alice-u', 'GALICE', 'GALICE'),
+              ('11-tx11-op-0-event-0', 'tx11', 11, now(), 'CROOT', 'alice', 'GALICE', 'GALICE'),
+              ('12-tx12-op-0-event-0', 'tx12', 12, now(), 'CUNV', 'bob', 'GBOB', 'GBOB'),
+              ('13-tx13-op-0-event-0', 'tx13', 13, now(), 'CROOT', 'flagged', 'GFLAG', 'GFLAG');
+            INSERT INTO v1.sec_flag_acct VALUES
+              ('14-tx14-op-0-event-0', 'tx14', 14, now(), 'CROOT', 'flagged', true, 'GFLAG');
+            INSERT INTO v1.published_wasms VALUES
+              ('100-tx100-op-0-event-0', 'tx100', 100, now(), 'CROOT', 'GALICE', '1.0.0', 'h1', 'token'),
+              ('101-tx101-op-0-event-0', 'tx101', 101, now(), 'CROOT', 'GBOB', '1.0.0', 'h2', 'vault');
+            INSERT INTO v1.deployed_contracts VALUES
+              ('110-tx110-op-0-event-0', 'tx110', 110, now(), 'CROOT', 'token', '1.0.0', 'GALICE', 'CA', 'CROOT'),
+              ('111-tx111-op-0-event-0', 'tx111', 111, now(), 'CROOT', 'vault', '1.0.0', 'GFLAG', 'CB', 'CROOT');
+            INSERT INTO v1.registered_contracts VALUES
+              ('110-tx110-op-0-event-1', 'tx110', 110, now(), 'CROOT', 'my-token', 'CA', false, 'h1'),
+              ('111-tx111-op-0-event-1', 'tx111', 111, now(), 'CROOT', 'my-vault', 'CB', false, 'h2');
+            INSERT INTO v1.index_height VALUES ('v1', 1000, now());
+        ";
+
+        async fn get(pool: &PgPool, uri: &str) -> Value {
+            let app = actix_test::init_service(
+                App::new()
+                    .wrap(TracingLogger::default())
+                    .app_data(web::Data::new(pool.clone()))
+                    .route("/v1/wasms", web::get().to(get_wasms))
+                    .route(
+                        "/v1/wasms/{wasm_name}",
+                        web::get().to(get_wasm_root_channel),
+                    )
+                    .route("/v1/contracts", web::get().to(get_contracts_root))
+                    .route(
+                        "/v1/contracts/{contract_name}",
+                        web::get().to(get_single_contract_root),
+                    )
+                    .route("/v1/changes", web::get().to(get_changes)),
+            )
+            .await;
+            let req = actix_test::TestRequest::get().uri(uri).to_request();
+            let resp = actix_test::call_service(&app, req).await;
+            assert!(resp.status().is_success(), "{uri}: {}", resp.status());
+            serde_json::from_slice(&actix_test::read_body(resp).await).unwrap()
+        }
+
+        fn by<'a>(body: &'a Value, key: &str, value: &str) -> &'a Value {
+            body["result"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|r| r[key] == value)
+                .unwrap_or_else(|| panic!("no {key}={value} in {body}"))
+        }
+
+        #[actix_web::test]
+        async fn author_and_deployer_names() {
+            let Some((pool, _guard)) = crate::test_db::pool(SEED).await else {
+                eprintln!("TEST_DATABASE_URL not set; skipping");
+                return;
+            };
+
+            let wasms = get(&pool, "/v1/wasms").await;
+            assert_eq!(by(&wasms, "wasm_name", "token")["author_name"], "alice");
+            assert_eq!(
+                by(&wasms, "wasm_name", "vault")["author_name"],
+                "unverified/bob"
+            );
+
+            let token = get(&pool, "/v1/wasms/token").await;
+            assert_eq!(token["author_name"], "alice");
+            assert_eq!(token["versions"][0]["author_name"], "alice");
+
+            let contracts = get(&pool, "/v1/contracts").await;
+            assert_eq!(
+                by(&contracts, "contract_name", "my-token")["deployer_name"],
+                "alice"
+            );
+            assert_eq!(
+                by(&contracts, "contract_name", "my-vault")["deployer_name"],
+                Value::Null
+            );
+            let my_token = get(&pool, "/v1/contracts/my-token").await;
+            assert_eq!(my_token["deployer_name"], "alice");
+
+            let changes = get(&pool, "/v1/changes").await;
+            let publish = by(&changes, "type", "publish");
+            assert_eq!(publish["wasm"]["author_name"], "alice");
+            let deploy = by(&changes, "type", "deploy");
+            assert_eq!(deploy["contract"]["deployer_name"], "alice");
+        }
+    }
 }
