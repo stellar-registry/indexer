@@ -261,6 +261,99 @@ fn parse_addresses(raw: Option<&str>) -> Result<Vec<String>, String> {
     Ok(addresses)
 }
 
+/// The network's `max_entry_ttl` (testnet and mainnet). `preauthorize_account`
+/// extends its entry by `max_ttl()`, which is one less than this.
+const MAX_ENTRY_TTL: i64 = 3_110_400;
+
+#[derive(Deserialize)]
+pub struct PreauthQuery {
+    channel: Option<String>,
+    name: Option<String>,
+    address: Option<String>,
+    owner: Option<String>,
+    limit: Option<i64>,
+    cursor: Option<String>,
+}
+
+/// A preauthorization not yet revoked or consumed, from the
+/// v1.pending_account_preauths view.
+#[derive(sqlx::FromRow, Serialize)]
+pub struct PreauthResult {
+    id: String,
+    transaction_hash: String,
+    ledger_sequence: i64,
+    created_at: chrono::NaiveDateTime,
+    channel: String,
+    account_name: String,
+    address: String,
+    owner: String,
+    /// Last ledger the on-chain entry is live.
+    live_until_ledger: i64,
+    /// Whether the indexed ledger has passed `live_until_ledger`; null
+    /// before the index height is known.
+    expired: Option<bool>,
+}
+
+/// Pending preauthorizations, filtered by any of channel, name, address
+/// and owner.
+pub async fn get_account_preauths(
+    pool: web::Data<PgPool>,
+    query: web::Query<PreauthQuery>,
+    request_id: RequestId,
+) -> HttpResponse {
+    let limit = query.limit.unwrap_or(200);
+    if !(1..=200).contains(&limit) {
+        return HttpResponse::BadRequest().json(ErrorResponse {
+            error: "Limit must be an integer between 1 and 200".into(),
+        });
+    }
+    let (ledger, cursor) = match parse_cursor(&query.cursor) {
+        Ok(val) => val,
+        Err(resp) => return resp,
+    };
+
+    let rows = sqlx::query_as::<_, PreauthResult>(
+        "SELECT p.id, p.transaction_hash, p.ledger_sequence, p.created_at, \
+                p.channel, p.account_name, p.address, p.owner, \
+                p.ledger_sequence + $8 - 1 AS live_until_ledger, \
+                h.ledger_sequence > p.ledger_sequence + $8 - 1 AS expired \
+         FROM v1.pending_account_preauths p \
+         LEFT JOIN v1.index_height h ON h.id = 'v1' \
+         WHERE (p.ledger_sequence, p.id) >= ($1, $2) \
+           AND ($4::text IS NULL OR p.channel = $4) \
+           AND ($5::text IS NULL OR p.account_name = $5) \
+           AND ($6::text IS NULL OR p.address = $6) \
+           AND ($7::text IS NULL OR p.owner = $7) \
+         ORDER BY p.ledger_sequence, p.id \
+         LIMIT $3",
+    )
+    .bind(ledger)
+    .bind(&cursor)
+    .bind(limit)
+    .bind(query.channel.as_deref())
+    .bind(query.name.as_deref())
+    .bind(query.address.as_deref())
+    .bind(query.owner.as_deref())
+    .bind(MAX_ENTRY_TTL)
+    .fetch_all(pool.get_ref())
+    .await;
+
+    match rows {
+        Ok(rows) => {
+            let next = if rows.len() as i64 == limit {
+                rows.last().map(|r| r.id.clone())
+            } else {
+                None
+            };
+            HttpResponse::Ok().json(ListResponse { result: rows, next })
+        }
+        Err(e) => {
+            log_db_error("get_account_preauths.select_preauths", &e, pool.get_ref());
+            internal_server_error_response(request_id)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -329,6 +422,7 @@ mod tests {
                     .wrap(TracingLogger::default())
                     .app_data(web::Data::new(pool.clone()))
                     .route("/v1/accounts", web::get().to(get_accounts_root))
+                    .route("/v1/accounts/preauths", web::get().to(get_account_preauths))
                     .route(
                         "/v1/accounts/by-address",
                         web::get().to(get_accounts_by_addresses),
@@ -434,6 +528,35 @@ mod tests {
                     ("fay".to_string(), "GFAY".to_string()),
                 ]
             );
+
+            let (status, preauths) = get(&pool, "/v1/accounts/preauths").await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(names(&preauths), ["carol", "fay"]);
+            let carol = &preauths["result"][0];
+            assert_eq!(carol["channel"], "root");
+            assert_eq!(carol["owner"], "GOWNER");
+            assert_eq!(carol["live_until_ledger"], 105 + MAX_ENTRY_TTL - 1);
+            assert_eq!(carol["expired"], Value::Null);
+            let (_, fay) = get(&pool, "/v1/accounts/preauths?name=fay&address=GFAY").await;
+            assert_eq!(fay["result"][0]["owner"], "GSOMEONE");
+            let (_, none) = get(&pool, "/v1/accounts/preauths?name=carol&owner=GSOMEONE").await;
+            assert_eq!(names(&none).len(), 0);
+            let (_, none) = get(&pool, "/v1/accounts/preauths?channel=unverified").await;
+            assert_eq!(names(&none).len(), 0);
+            let (_, page1) = get(&pool, "/v1/accounts/preauths?limit=1").await;
+            let cursor = page1["next"].as_str().unwrap().to_string();
+            let (_, page2) = get(&pool, &format!("/v1/accounts/preauths?cursor={cursor}")).await;
+            assert_eq!(names(&page2), ["fay"]);
+
+            // Carol's entry lapses one ledger before Fay's.
+            sqlx::query("INSERT INTO v1.index_height VALUES ('v1', $1, now())")
+                .bind(108 + MAX_ENTRY_TTL - 2)
+                .execute(&pool)
+                .await
+                .unwrap();
+            let (_, preauths) = get(&pool, "/v1/accounts/preauths").await;
+            assert_eq!(preauths["result"][0]["expired"], true);
+            assert_eq!(preauths["result"][1]["expired"], false);
         }
     }
 

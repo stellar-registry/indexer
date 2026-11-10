@@ -132,8 +132,11 @@ Wasm, contract and `/v1/changes` responses also label `author` and
 one name per address, skipping flagged accounts and preferring a root-registry
 name, with subregistry names prefixed by their channel (`unverified/alice`).
 
-`v1.pending_account_preauths` lists preauthorizations not yet revoked or
-consumed. Expiry isn't evented, so old rows may have lapsed.
+- `GET /v1/accounts/preauths?channel=&name=&address=&owner=`: preauthorizations
+  not yet revoked or consumed (`v1.pending_account_preauths`), each filter
+  optional. Expiry isn't evented, so each row carries `live_until_ledger`
+  (its ledger plus the network's max entry TTL, minus one) and `expired`,
+  which compares that against the index height.
 
 The account events add new sinks, so `turbo apply` indexes them from the
 pipeline's current checkpoint (see Deployment). Mainnet has no account
