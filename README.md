@@ -136,9 +136,7 @@ name, with subregistry names prefixed by their channel (`unverified/alice`).
   not yet revoked or consumed (`v1.pending_account_preauths`), each filter
   optional. Expiry isn't evented, so each row carries `live_until_ledger`
   (its ledger plus the registry's ~7-day preauth lifetime) and `expired`,
-  which compares that against the index height. Preauths from v0.8.0
-  registries (testnet), which predate the cap, last up to ~180 days, so they
-  can show as expired early.
+  which compares that against the index height.
 
 The account events add new sinks, so `turbo apply` indexes them from the
 pipeline's current checkpoint (see Deployment). Mainnet has no account
