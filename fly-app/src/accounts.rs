@@ -261,9 +261,9 @@ fn parse_addresses(raw: Option<&str>) -> Result<Vec<String>, String> {
     Ok(addresses)
 }
 
-/// `preauthorize_account` extends its entry by the registry's `PREAUTH_TTL`
-/// (~30 days, contracts#80).
-const PREAUTH_TTL: i64 = 518_400;
+/// `preauthorize_account` extends its entry by the registry's `BATCH_TTL`
+/// (~7 days, contracts#80).
+const PREAUTH_TTL: i64 = 120_960;
 
 #[derive(Deserialize)]
 pub struct PreauthQuery {
