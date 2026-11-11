@@ -262,7 +262,7 @@ fn parse_addresses(raw: Option<&str>) -> Result<Vec<String>, String> {
 }
 
 /// `preauthorize_account` extends its entry by the registry's `BATCH_TTL`
-/// (~7 days, contracts#80).
+/// (~7 days).
 const PREAUTH_TTL: i64 = 120_960;
 
 #[derive(Deserialize)]
