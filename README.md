@@ -135,8 +135,10 @@ name, with subregistry names prefixed by their channel (`unverified/alice`).
 - `GET /v1/accounts/preauths?channel=&name=&address=&owner=`: preauthorizations
   not yet revoked or consumed (`v1.pending_account_preauths`), each filter
   optional. Expiry isn't evented, so each row carries `live_until_ledger`
-  (its ledger plus the network's max entry TTL, minus one) and `expired`,
-  which compares that against the index height.
+  (its ledger plus the registry's ~30-day preauth lifetime) and `expired`,
+  which compares that against the index height. Preauths from registries
+  older than contracts#80 (v0.8.0 on testnet) last up to ~180 days, so they
+  can show as expired early.
 
 The account events add new sinks, so `turbo apply` indexes them from the
 pipeline's current checkpoint (see Deployment). Mainnet has no account

@@ -261,9 +261,9 @@ fn parse_addresses(raw: Option<&str>) -> Result<Vec<String>, String> {
     Ok(addresses)
 }
 
-/// The network's `max_entry_ttl` (testnet and mainnet). `preauthorize_account`
-/// extends its entry by `max_ttl()`, which is one less than this.
-const MAX_ENTRY_TTL: i64 = 3_110_400;
+/// `preauthorize_account` extends its entry by the registry's `PREAUTH_TTL`
+/// (~30 days, contracts#80).
+const PREAUTH_TTL: i64 = 518_400;
 
 #[derive(Deserialize)]
 pub struct PreauthQuery {
@@ -315,8 +315,8 @@ pub async fn get_account_preauths(
     let rows = sqlx::query_as::<_, PreauthResult>(
         "SELECT p.id, p.transaction_hash, p.ledger_sequence, p.created_at, \
                 p.channel, p.account_name, p.address, p.owner, \
-                p.ledger_sequence + $8 - 1 AS live_until_ledger, \
-                h.ledger_sequence > p.ledger_sequence + $8 - 1 AS expired \
+                p.ledger_sequence + $8 AS live_until_ledger, \
+                h.ledger_sequence > p.ledger_sequence + $8 AS expired \
          FROM v1.pending_account_preauths p \
          LEFT JOIN v1.index_height h ON h.id = 'v1' \
          WHERE (p.ledger_sequence, p.id) >= ($1, $2) \
@@ -334,7 +334,7 @@ pub async fn get_account_preauths(
     .bind(query.name.as_deref())
     .bind(query.address.as_deref())
     .bind(query.owner.as_deref())
-    .bind(MAX_ENTRY_TTL)
+    .bind(PREAUTH_TTL)
     .fetch_all(pool.get_ref())
     .await;
 
@@ -535,7 +535,7 @@ mod tests {
             let carol = &preauths["result"][0];
             assert_eq!(carol["channel"], "root");
             assert_eq!(carol["owner"], "GOWNER");
-            assert_eq!(carol["live_until_ledger"], 105 + MAX_ENTRY_TTL - 1);
+            assert_eq!(carol["live_until_ledger"], 105 + PREAUTH_TTL);
             assert_eq!(carol["expired"], Value::Null);
             let (_, fay) = get(&pool, "/v1/accounts/preauths?name=fay&address=GFAY").await;
             assert_eq!(fay["result"][0]["owner"], "GSOMEONE");
@@ -550,7 +550,7 @@ mod tests {
 
             // Carol's entry lapses one ledger before Fay's.
             sqlx::query("INSERT INTO v1.index_height VALUES ('v1', $1, now())")
-                .bind(108 + MAX_ENTRY_TTL - 2)
+                .bind(108 + PREAUTH_TTL - 1)
                 .execute(&pool)
                 .await
                 .unwrap();
