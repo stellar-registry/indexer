@@ -7,8 +7,8 @@ use sqlx::PgPool;
 use tracing_actix_web::{DefaultRootSpanBuilder, RequestId, TracingLogger};
 
 use crate::accounts::{
-    get_accounts_by_address, get_accounts_by_addresses, get_accounts_root, get_single_account,
-    get_single_account_root,
+    get_account_preauths, get_accounts_by_address, get_accounts_by_addresses, get_accounts_root,
+    get_single_account, get_single_account_root,
 };
 use crate::api_keys::{api_key_middleware, load_api_key_config};
 use crate::changes::{get_changes, get_index_height};
@@ -907,7 +907,8 @@ async fn main() -> std::io::Result<()> {
                     )
                     .route("/accounts", web::get().to(get_accounts_root))
                     // Before the {account_name} routes, which would match
-                    // "by-address" as a name or channel.
+                    // "by-address" or "preauths" as a name or channel.
+                    .route("/accounts/preauths", web::get().to(get_account_preauths))
                     .route(
                         "/accounts/by-address",
                         web::get().to(get_accounts_by_addresses),
