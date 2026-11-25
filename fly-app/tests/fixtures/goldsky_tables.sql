@@ -23,3 +23,4 @@ CREATE TABLE v1.rename_account (id text PRIMARY KEY, transaction_hash text, ledg
 CREATE TABLE v1.sec_flag_acct (id text PRIMARY KEY, transaction_hash text, ledger_sequence bigint, created_at timestamp, emitter_contract_id text, account_name text, flagged boolean, operator text);
 CREATE TABLE v1.preauth_acct (id text PRIMARY KEY, transaction_hash text, ledger_sequence bigint, created_at timestamp, emitter_contract_id text, account_name text, account_id text, owner text);
 CREATE TABLE v1.revoke_preauth_acct (id text PRIMARY KEY, transaction_hash text, ledger_sequence bigint, created_at timestamp, emitter_contract_id text, account_name text, account_id text);
+CREATE TABLE v1.raw_events_backup (contract_id text, operation_body text);

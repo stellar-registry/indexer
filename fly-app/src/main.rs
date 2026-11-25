@@ -689,7 +689,7 @@ async fn fetch_single_contract_detail(
                 deployed.deployer,
                 an.display_name AS deployer_name,
                 raw_event.operation_body
-            FROM v1.registered_contracts_with_channel registered
+            FROM v1.contracts registered
             LEFT JOIN (
                 SELECT DISTINCT ON (contract_id) contract_id, deployer, transaction_hash
                 FROM v1.deployed_contracts

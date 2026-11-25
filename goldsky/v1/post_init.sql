@@ -108,8 +108,9 @@ LEFT JOIN published_wasms p ON p.wasm_hash = u.wasm_hash;
 DROP VIEW IF EXISTS changes;
 DROP VIEW IF EXISTS contract_registrations;
 DROP VIEW IF EXISTS contract_name_events;
-DROP VIEW IF EXISTS contract_name_history;
 DROP VIEW IF EXISTS contracts_enriched;
+DROP VIEW IF EXISTS contracts;
+DROP VIEW IF EXISTS contract_name_history;
 DROP VIEW IF EXISTS versions;
 
 CREATE VIEW versions AS
@@ -157,14 +158,57 @@ LEFT JOIN (
 ) p ON p.wasm_hash = t.wasm_hash
 LEFT JOIN registries r ON r.contract_id = p.emitter_contract_id;
 
+-- Each registration's name over time: one row per name it has held,
+-- [since, until) in (ledger_sequence, id) order. A rename applies to
+-- the registration holding old_name when the rename happened, so the
+-- chain follows the first rename of the current name after taking it.
+CREATE VIEW contract_name_history AS
+WITH RECURSIVE chain AS (
+  SELECT
+    r.id AS registration_id,
+    r.emitter_contract_id,
+    r.contract_name AS name,
+    r.ledger_sequence,
+    r.id AS since_id,
+    0 AS step
+  FROM registered_contracts r
+  UNION ALL
+  SELECT
+    c.registration_id,
+    c.emitter_contract_id,
+    n.new_name,
+    n.ledger_sequence,
+    n.id,
+    c.step + 1
+  FROM chain c
+  CROSS JOIN LATERAL (
+    SELECT x.new_name, x.ledger_sequence, x.id
+    FROM rename x
+    WHERE x.emitter_contract_id = c.emitter_contract_id
+      AND x.old_name = c.name
+      AND (x.ledger_sequence, x.id) > (c.ledger_sequence, c.since_id)
+    ORDER BY x.ledger_sequence, x.id
+    LIMIT 1
+  ) n
+)
+SELECT
+  registration_id,
+  emitter_contract_id,
+  name,
+  ledger_sequence AS since_ledger,
+  since_id,
+  LEAD(ledger_sequence) OVER w AS until_ledger,
+  LEAD(since_id) OVER w AS until_id
+FROM chain
+WINDOW w AS (PARTITION BY registration_id ORDER BY step);
+
 -- One row per known contract — the JOIN of registered_contracts (the
 -- registry's `register` events, which give the contract a name) and
 -- deployed_contracts (the registry's `deploy` events, which record who
 -- triggered the deploy). Anchored on registered_contracts because the
 -- API addresses contracts by name; deployed-only contracts (deploy
--- event but no register event) are out of scope.
-
-DROP VIEW IF EXISTS contracts;
+-- event but no register event) are out of scope. contract_name is the
+-- registration's current name, after any renames.
 
 CREATE VIEW contracts AS
 SELECT
@@ -173,13 +217,15 @@ SELECT
   registered.ledger_sequence,
   registered.created_at,
   registered.contract_id,
-  registered.contract_name,
+  cur.name AS contract_name,
   registered.channel,
   registered.sac,
   registered.wasm_hash,
   deployed.deployer,
   deployed.registry_contract_id
 FROM registered_contracts_with_channel registered
+JOIN contract_name_history cur
+  ON cur.registration_id = registered.id AND cur.until_id IS NULL
 LEFT JOIN (
   SELECT DISTINCT ON (contract_id) contract_id, deployer, registry_contract_id
   FROM deployed_contracts
@@ -249,50 +295,6 @@ CREATE TABLE IF NOT EXISTS contract_verifications (
 -- the entry by whatever name it has at that point. A registration
 -- (its `register` event id) is the stable identity; these views fold
 -- the name-keyed events onto it.
-
--- Each registration's name over time: one row per name it has held,
--- [since, until) in (ledger_sequence, id) order. A rename applies to
--- the registration holding old_name when the rename happened, so the
--- chain follows the first rename of the current name after taking it.
-CREATE VIEW contract_name_history AS
-WITH RECURSIVE chain AS (
-  SELECT
-    r.id AS registration_id,
-    r.emitter_contract_id,
-    r.contract_name AS name,
-    r.ledger_sequence,
-    r.id AS since_id,
-    0 AS step
-  FROM registered_contracts r
-  UNION ALL
-  SELECT
-    c.registration_id,
-    c.emitter_contract_id,
-    n.new_name,
-    n.ledger_sequence,
-    n.id,
-    c.step + 1
-  FROM chain c
-  CROSS JOIN LATERAL (
-    SELECT x.new_name, x.ledger_sequence, x.id
-    FROM rename x
-    WHERE x.emitter_contract_id = c.emitter_contract_id
-      AND x.old_name = c.name
-      AND (x.ledger_sequence, x.id) > (c.ledger_sequence, c.since_id)
-    ORDER BY x.ledger_sequence, x.id
-    LIMIT 1
-  ) n
-)
-SELECT
-  registration_id,
-  emitter_contract_id,
-  name,
-  ledger_sequence AS since_ledger,
-  since_id,
-  LEAD(ledger_sequence) OVER w AS until_ledger,
-  LEAD(since_id) OVER w AS until_id
-FROM chain
-WINDOW w AS (PARTITION BY registration_id ORDER BY step);
 
 -- update_address / update_owner events, attributed to the registration
 -- that held contract_name when the event happened.

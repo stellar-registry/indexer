@@ -384,5 +384,70 @@ mod tests {
             let (status, _) = get(&pool, "/v1/index-height").await;
             assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
         }
+
+        #[actix_web::test]
+        async fn contract_lookups_follow_renames() {
+            let Some((pool, _guard)) = crate::test_db::pool(SEED).await else {
+                eprintln!("TEST_DATABASE_URL not set; skipping");
+                return;
+            };
+            sqlx::query("INSERT INTO v1.raw_events_backup VALUES ('tx110', '{}')")
+                .execute(&pool)
+                .await
+                .unwrap();
+            let app = actix_test::init_service(
+                App::new()
+                    .wrap(TracingLogger::default())
+                    .app_data(web::Data::new(pool.clone()))
+                    .route("/v1/contracts", web::get().to(crate::get_contracts_root))
+                    .route(
+                        "/v1/contract_deploy_details/{channel}/{contract_name}",
+                        web::get().to(crate::get_contract_deploy_detail),
+                    )
+                    .route(
+                        "/v1/contracts/{channel}/{contract_name}",
+                        web::get().to(crate::get_single_contract),
+                    ),
+            )
+            .await;
+            let get = |uri: &'static str| {
+                let req = actix_test::TestRequest::get().uri(uri).to_request();
+                let app = &app;
+                async move {
+                    let resp = actix_test::call_service(app, req).await;
+                    let status = resp.status();
+                    let body = actix_test::read_body(resp).await;
+                    (
+                        status,
+                        serde_json::from_slice::<Value>(&body).unwrap_or(Value::Null),
+                    )
+                }
+            };
+
+            let (_, list) = get("/v1/contracts").await;
+            let names: Vec<_> = list["result"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|c| c["contract_name"].as_str().unwrap())
+                .collect();
+            assert_eq!(names, ["gamma", "alpha"]);
+
+            let (status, gamma) = get("/v1/contracts/main/gamma").await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(gamma["id"], "110-tx110-op-0-event-1");
+            assert_eq!(gamma["contract_name"], "gamma");
+            // "alpha" now belongs to the second registration only.
+            let (_, alpha) = get("/v1/contracts/main/alpha").await;
+            assert_eq!(alpha["id"], "130-tx130-op-0-event-0");
+            let (status, _) = get("/v1/contracts/main/beta").await;
+            assert_eq!(status, StatusCode::NOT_FOUND);
+
+            let (status, deploy) = get("/v1/contract_deploy_details/main/gamma").await;
+            assert_eq!(status, StatusCode::OK);
+            assert_eq!(deploy["contract_name"], "gamma");
+            let (status, _) = get("/v1/contract_deploy_details/main/beta").await;
+            assert_eq!(status, StatusCode::NOT_FOUND);
+        }
     }
 }
