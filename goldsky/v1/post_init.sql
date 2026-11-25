@@ -107,9 +107,9 @@ LEFT JOIN published_wasms p ON p.wasm_hash = u.wasm_hash;
 -- The change-feed views below depend on versions, so they go first.
 DROP VIEW IF EXISTS changes;
 DROP VIEW IF EXISTS contract_registrations;
-DROP VIEW IF EXISTS contract_name_events;
 DROP VIEW IF EXISTS contracts_enriched;
 DROP VIEW IF EXISTS contracts;
+DROP VIEW IF EXISTS contract_name_events;
 DROP VIEW IF EXISTS contract_name_history;
 DROP VIEW IF EXISTS versions;
 
@@ -202,13 +202,42 @@ SELECT
 FROM chain
 WINDOW w AS (PARTITION BY registration_id ORDER BY step);
 
+-- update_address / update_owner events, attributed to the registration
+-- that held contract_name when the event happened.
+CREATE VIEW contract_name_events AS
+SELECT
+  e.id,
+  e.ledger_sequence,
+  e.created_at,
+  e.transaction_hash,
+  e.emitter_contract_id,
+  e.type,
+  e.contract_name,
+  e.value,
+  h.registration_id
+FROM (
+  SELECT id, ledger_sequence, created_at, transaction_hash, emitter_contract_id,
+         'update_address'::text AS type, contract_name, new_address AS value
+  FROM update_address
+  UNION ALL
+  SELECT id, ledger_sequence, created_at, transaction_hash, emitter_contract_id,
+         'update_owner'::text, contract_name, new_owner
+  FROM update_owner
+) e
+LEFT JOIN contract_name_history h
+  ON h.emitter_contract_id = e.emitter_contract_id
+ AND h.name = e.contract_name
+ AND (h.since_ledger, h.since_id) < (e.ledger_sequence, e.id)
+ AND (h.until_id IS NULL OR (e.ledger_sequence, e.id) < (h.until_ledger, h.until_id));
+
 -- One row per known contract — the JOIN of registered_contracts (the
 -- registry's `register` events, which give the contract a name) and
 -- deployed_contracts (the registry's `deploy` events, which record who
 -- triggered the deploy). Anchored on registered_contracts because the
 -- API addresses contracts by name; deployed-only contracts (deploy
--- event but no register event) are out of scope. contract_name is the
--- registration's current name, after any renames.
+-- event but no register event) are out of scope. contract_name and
+-- contract_id are the registration's current name and address, after any
+-- renames and update_address events.
 
 CREATE VIEW contracts AS
 SELECT
@@ -216,7 +245,7 @@ SELECT
   registered.transaction_hash,
   registered.ledger_sequence,
   registered.created_at,
-  registered.contract_id,
+  COALESCE(addr.value, registered.contract_id) AS contract_id,
   cur.name AS contract_name,
   registered.channel,
   registered.sac,
@@ -226,11 +255,17 @@ SELECT
 FROM registered_contracts_with_channel registered
 JOIN contract_name_history cur
   ON cur.registration_id = registered.id AND cur.until_id IS NULL
+LEFT JOIN LATERAL (
+  SELECT value FROM contract_name_events
+  WHERE registration_id = registered.id AND type = 'update_address'
+  ORDER BY ledger_sequence DESC, id DESC
+  LIMIT 1
+) addr ON true
 LEFT JOIN (
   SELECT DISTINCT ON (contract_id) contract_id, deployer, registry_contract_id
   FROM deployed_contracts
   ORDER BY contract_id, ledger_sequence DESC
-) deployed ON deployed.contract_id = registered.contract_id;
+) deployed ON deployed.contract_id = COALESCE(addr.value, registered.contract_id);
 
 -- Contracts decorated with the metadata of the wasm they're CURRENTLY
 -- running — the latest version row from v1.versions per contract.
@@ -295,34 +330,6 @@ CREATE TABLE IF NOT EXISTS contract_verifications (
 -- the entry by whatever name it has at that point. A registration
 -- (its `register` event id) is the stable identity; these views fold
 -- the name-keyed events onto it.
-
--- update_address / update_owner events, attributed to the registration
--- that held contract_name when the event happened.
-CREATE VIEW contract_name_events AS
-SELECT
-  e.id,
-  e.ledger_sequence,
-  e.created_at,
-  e.transaction_hash,
-  e.emitter_contract_id,
-  e.type,
-  e.contract_name,
-  e.value,
-  h.registration_id
-FROM (
-  SELECT id, ledger_sequence, created_at, transaction_hash, emitter_contract_id,
-         'update_address'::text AS type, contract_name, new_address AS value
-  FROM update_address
-  UNION ALL
-  SELECT id, ledger_sequence, created_at, transaction_hash, emitter_contract_id,
-         'update_owner'::text, contract_name, new_owner
-  FROM update_owner
-) e
-LEFT JOIN contract_name_history h
-  ON h.emitter_contract_id = e.emitter_contract_id
- AND h.name = e.contract_name
- AND (h.since_ledger, h.since_id) < (e.ledger_sequence, e.id)
- AND (h.until_id IS NULL OR (e.ledger_sequence, e.id) < (h.until_ledger, h.until_id));
 
 -- Current state of every registration. owner is NULL until an
 -- update_owner event: `register` doesn't emit the initial owner.
