@@ -386,15 +386,21 @@ mod tests {
         }
 
         #[actix_web::test]
-        async fn contract_lookups_follow_renames() {
+        async fn contract_lookups_follow_renames_and_address_updates() {
             let Some((pool, _guard)) = crate::test_db::pool(SEED).await else {
                 eprintln!("TEST_DATABASE_URL not set; skipping");
                 return;
             };
-            sqlx::query("INSERT INTO v1.raw_events_backup VALUES ('tx110', '{}')")
-                .execute(&pool)
-                .await
-                .unwrap();
+            // The address "beta" moved to at ledger 140 was itself deployed
+            // through the registry.
+            sqlx::raw_sql(
+                "INSERT INTO v1.deployed_contracts VALUES
+                   ('139-tx139-op-0-event-0', 'tx139', 139, now(), 'CMAIN', 'token', '1.0.0', 'GDEPLOYER2', 'CC', 'CMAIN');
+                 INSERT INTO v1.raw_events_backup VALUES ('tx110', '{}'), ('tx139', '{}');",
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
             let app = actix_test::init_service(
                 App::new()
                     .wrap(TracingLogger::default())
@@ -437,15 +443,21 @@ mod tests {
             assert_eq!(status, StatusCode::OK);
             assert_eq!(gamma["id"], "110-tx110-op-0-event-1");
             assert_eq!(gamma["contract_name"], "gamma");
+            assert_eq!(gamma["contract_id"], "CC");
+            assert_eq!(gamma["deployer"], "GDEPLOYER2");
+            assert_eq!(gamma["versions"][0]["ledger_sequence"], 139);
             // "alpha" now belongs to the second registration only.
             let (_, alpha) = get("/v1/contracts/main/alpha").await;
             assert_eq!(alpha["id"], "130-tx130-op-0-event-0");
+            assert_eq!(alpha["contract_id"], "CB");
             let (status, _) = get("/v1/contracts/main/beta").await;
             assert_eq!(status, StatusCode::NOT_FOUND);
 
             let (status, deploy) = get("/v1/contract_deploy_details/main/gamma").await;
             assert_eq!(status, StatusCode::OK);
             assert_eq!(deploy["contract_name"], "gamma");
+            assert_eq!(deploy["contract_id"], "CC");
+            assert_eq!(deploy["deployer"], "GDEPLOYER2");
             let (status, _) = get("/v1/contract_deploy_details/main/beta").await;
             assert_eq!(status, StatusCode::NOT_FOUND);
         }
